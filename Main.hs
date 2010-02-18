@@ -31,9 +31,9 @@ main = do
         case msg of
              Message { msg_command = "PING" } -> do
 
-                 putStr "Ping? "
+                 -- putStr "Ping? "
                  send Pong
-                 putStrLn "Pong!"
+                 -- putStrLn "Pong!"
 
              Message { msg_command = "INVITE", msg_params = [_,chan] } -> do
 
@@ -43,7 +43,7 @@ main = do
 
              Message { msg_command = "PRIVMSG", msg_prefix = Just (NickName nick _ _), msg_params = [chan, text] } -> do
 
-                 putStrLn $ chan ++ ": <" ++ nick ++ "> " ++ text
+                 -- putStrLn $ chan ++ ": <" ++ nick ++ "> " ++ text
 
                  forkIO . onException (return ()) $
 
@@ -54,7 +54,7 @@ main = do
 
                                         Just (TextReply to str) -> do
 
-                                            putStrLn $ "Sending text reply: " ++ str
+                                            putStrLn $ "Sending text reply: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
                                             mapM_ (send . PrivMsg (fromMaybe chan to)) (lines str)
 
                                         Just (IOReply to io) -> do
@@ -62,7 +62,7 @@ main = do
                                             putStr "Running IO command..."
                                             s <- safe io
                                             case s of
-                                                 Just (Just str) -> do putStrLn $ "OK! Sending: " ++ str
+                                                 Just (Just str) -> do putStrLn $ "OK! Sending: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
                                                                        send $ PrivMsg (fromMaybe chan to) str
                                                  Just Nothing    -> putStrLn $ "Fail: No Function result"
                                                  _               -> putStrLn $ "Fail: Exception"

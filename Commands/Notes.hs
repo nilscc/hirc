@@ -32,7 +32,7 @@ readMessages for = do
     con <- connectSqlite3 sqlite3Db
 
     results <- quickQuery' con "SELECT * FROM notes WHERE toNick = ?" [toSql for]
-    let messages = map (\[f,t,m] -> fromSql m) results
+    let messages = map (\[f,t,m] -> fromSql f ++ ": " ++ fromSql m) results
 
     -- Delete the old messages
     run con "DELETE FROM notes WHERE toNick = ?" [toSql for]

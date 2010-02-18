@@ -10,8 +10,6 @@ import Control.Arrow
 import Control.Concurrent
 import Control.Monad
 import Data.Maybe (isNothing)
-import Network.Curl
-import Network.URI
 
 import Text.ParserCombinators.Parsec hiding (many, optional, (<|>), string, spaces)
 import qualified Text.ParserCombinators.Parsec as P
