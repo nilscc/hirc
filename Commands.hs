@@ -129,6 +129,8 @@ commandsWithPrefix from to = msum
         mapM foo rpl
 
 
+    -- try to parse everything without prefixes since we had no success with prefixes so far :)
+    , commandsWithoutPrefix from to
     ]
 
 commandsWithoutPrefix :: String -> Maybe String -> Parser [Reply]
@@ -137,7 +139,7 @@ commandsWithoutPrefix from to = msum
     [ do
         anyChar `manyTill` (string "http://" <|> string "www.")
         url <- anyChar `manyTill` (spaces <|> eof)
-        return . pure . SafeReply . IOReply Nothing $ fmap (("Title: " ++) . take 150) <$> getTitleOfUrl url
+        return . pure . IOReply Nothing $ fmap (("Title: " ++) . take 150) <$> getTitleOfUrl url
     ]
 
     {-
