@@ -104,9 +104,10 @@ commandsWithPrefix from to = msum
 
     , do
         string "help"
-        pure . text to <$> (<|>) (eof    >> return "translate give fu le-fu faen perkele penis")
+        pure . text to <$> (<|>) (eof    >> return "translate google give fu le-fu faen perkele penis")
                                  (spaces >> msum [ string "translate"      >> return "translate (<word> | \"<string>\") [from] <language> [to | →] <language>"
                                                  , string "give"           >> return "give <name> <command>"
+                                                 , string "google"         >> return "google <string>"
                                                  ])
 
     , do
