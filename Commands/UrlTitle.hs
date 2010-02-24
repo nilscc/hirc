@@ -26,7 +26,11 @@ performCurl url = do
 getTitle :: XML -> Maybe String
 getTitle xml =
     case concatMap (filterElementsName $ (== "title") . map toLower . qName) (onlyElems xml) of
-         [Element { elContent = [Text CData { cdData = s }] }] -> justIfNotNull . concatWith " " . map stripSpaces $ lines s
+         [Element { elContent = cont }] ->
+             case onlyText cont of
+                  (CData { cdData = s } :_) ->
+                      justIfNotNull . concatWith " " . map stripSpaces $ lines s
+                  _ -> Nothing
          _ -> Nothing
 
   where justIfNotNull "" = Nothing
