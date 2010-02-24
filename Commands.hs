@@ -19,6 +19,7 @@ import qualified Text.ParserCombinators.Parsec as P
 import Commands.Notes
 import Commands.UrlTitle
 import Commands.GoogleTranslation
+import Commands.GoogleSearch
 import Utils
 
 type SendTo = Maybe String
@@ -84,6 +85,11 @@ io to f = IOReply Nothing (maybe Nothing (Just . (concatWith ", " to ++).(": " +
 
 -- }}}
 
+-- | Cut a string after n characters
+cutAt :: Int -> String -> String
+cutAt n s | length s > n = take n s ++ "..."
+          | otherwise    = s
+
 commandsWithPrefix :: String -> [String] -> Parser [Reply]
 commandsWithPrefix from to = msum
 
@@ -109,8 +115,18 @@ commandsWithPrefix from to = msum
         (string "to" >> spaces) <|> (char '→' >> spaces) <|> return ()
 
         to'   <- many1 letter
-        return . pure . io to $ getGoogleTranslation from' to' what
+        return . pure . io to $ fmap (("Google translation: \"" ++).(++ "\"") . cutAt 100) <$> getGoogleTranslation from' to' what
 
+    , do
+        string "google"
+        spaces
+
+        qry <- many anyChar
+        return . pure . io to $ do
+            res <- getGoogleSearch qry
+            return $ case res of
+                          Just (url,title) -> Just $ "Google search: \"" ++ cutAt 100 title ++ "\" <" ++ url ++">"
+                          _ -> Nothing
     {-
     , do
         string "tell"

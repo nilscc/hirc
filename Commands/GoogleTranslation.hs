@@ -48,7 +48,7 @@ jsonToTranslation (JObject m) = do
          200 -> do
              JObject translated <- M.lookup "responseData" m
              JString text       <- M.lookup "translatedText" translated
-             return text
+             return . concat $ lines text
          _ ->
              Nothing
 
