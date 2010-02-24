@@ -18,6 +18,7 @@ import qualified Text.ParserCombinators.Parsec as P
 
 import Commands.Notes
 import Commands.UrlTitle
+import Commands.GoogleTranslation
 import Utils
 
 type SendTo = Maybe String
@@ -94,6 +95,21 @@ commandsWithPrefix from to = msum
         , string "perkele"    >> return "Perkele! http://www.youtube.com/watch?v=i9K2BxMsdm4"
         , string "penis"      >> return "8========D"
         ]
+
+    , do
+        string "translate"
+        spaces
+
+        what  <- (char '"' *> manyTill anyChar (char '"')) <|> (manyTill anyChar (lookAhead space))
+        spaces
+        (string "from" >> spaces) <|> return ()
+
+        from' <- many1 letter
+        spaces
+        (string "to" >> spaces) <|> (char '→' >> spaces) <|> return ()
+
+        to'   <- many1 letter
+        return . pure . io to $ getGoogleTranslation from' to' what
 
     {-
     , do

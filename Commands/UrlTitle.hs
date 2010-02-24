@@ -9,21 +9,14 @@ module Commands.UrlTitle
 
 import Control.Monad
 import Data.Char
-import Network.Curl hiding (Content)
 import Text.XML.Light
 
-type XML = [Content]
+import Commands.Curl
 
--- | Run curl and return the parsed XML
-performCurl :: URLString -> IO (Maybe XML)
-performCurl url = do
-    (r,s) <- curlGetString url [CurlFollowLocation True, CurlMaxRedirs 20]
-    return $ case r of
-                  CurlOK -> Just $ parseXML s
-                  _      -> Nothing
+type URLString = String
 
 -- | Get the title element of our XML data
-getTitle :: XML -> Maybe String
+getTitle :: [Content] -> Maybe String
 getTitle xml =
     case concatMap (filterElementsName $ (== "title") . map toLower . qName) (onlyElems xml) of
          [Element { elContent = cont }] ->
