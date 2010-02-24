@@ -50,14 +50,14 @@ main = do
                      let
                          run rpl = case rpl of
 
-                                        Just (SafeReply rpl') -> run $ Just rpl'
+                                        SafeReply rpl' -> run $ rpl'
 
-                                        Just (TextReply to str) -> do
+                                        TextReply to str -> do
 
                                             putStrLn $ "Sending text reply: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
                                             mapM_ (send . PrivMsg (fromMaybe chan to)) (lines str)
 
-                                        Just (IOReply to io) -> do
+                                        IOReply to io -> do
 
                                             putStr "Running IO command..."
                                             s <- safe io
@@ -67,9 +67,9 @@ main = do
                                                  Just Nothing    -> putStrLn $ "Fail: No Function result"
                                                  _               -> putStrLn $ "Fail: Exception"
 
-                                        _ -> return ()
+                                        -- _ -> return ()
 
-                     in run $ parseCommand (nickName ++ ": ") nick text 
+                     in mapM_ run $ parseCommand (nickName ++ ": ") nick text 
                  return ()
              _ -> return ()
 

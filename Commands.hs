@@ -10,11 +10,14 @@ import Control.Arrow
 import Control.Concurrent
 import Control.Monad
 import Data.Maybe (isNothing)
+import Data.Time
+import System.Locale
 
 import Text.ParserCombinators.Parsec hiding (many, optional, (<|>), string, spaces)
 import qualified Text.ParserCombinators.Parsec as P
 
 import Commands.Notes
+import Commands.UrlTitle
 
 type SendTo = Maybe String
 
@@ -24,6 +27,9 @@ type SendTo = Maybe String
 data Reply = TextReply SendTo String
            | IOReply   SendTo (IO (Maybe String))
            | SafeReply Reply                        -- ^ this one cannot be "given away"
+           deriving Show
+
+instance Show (IO a) where show _ = "IO"
 
 -- {{{ Internal parser stuff...
 
@@ -44,14 +50,14 @@ instance Alternative (GenParser s a) where
 parseCommand :: String          -- ^ command prefix
              -> String          -- ^ from
              -> String          -- ^ text to parse
-             -> Maybe Reply
-parseCommand prefix from text = either (const Nothing) (Just) $
+             -> [Reply]
+parseCommand prefix from text = either (const []) id $
     parse (commands prefix from) "parseCommand" text
 
 --
 -- Look for prefix, then parse commands
 --
-commands :: String -> String -> Parser Reply
+commands :: String -> String -> Parser [Reply]
 commands prefix from = (try (string prefix) *> commandsWithPrefix from Nothing) <|> commandsWithoutPrefix from Nothing
 
 
@@ -78,34 +84,38 @@ io to f =
 
 -- }}}
 
-commandsWithPrefix :: String -> Maybe String -> Parser Reply
+commandsWithPrefix :: String -> Maybe String -> Parser [Reply]
 commandsWithPrefix from to = msum
 
-    [ do
+    -- basicly just aliases:
+    [ pure . text to <$> msum
+        [ string "fu"         >> return "Fuck you!"
+        , string "le fu-"     >> return "Le fu-, we do not le rage so vulgarity. http://n-sch.de/lefu.png"
+        , string "faen"       >> return "http://www.youtube.com/watch?v=AkJf0md1kG8"
+        , string "perkele"    >> return "Perkele! http://www.youtube.com/watch?v=i9K2BxMsdm4"
+        , string "penis"      >> return "8========D"
+        ]
+
+    {-
+    , do
         string "tell"
         spaces
         to' <- many1 alphaNum
         spaces
         msg <- many1 anyChar
-        return . SafeReply . IOReply Nothing $ do
+        return . pure . SafeReply . IOReply Nothing $ do
             -- Store in our database.
             noteMessage from to' msg
             return $ Just "Consider it noted."
 
     , do
         string "read"
-        return . SafeReply . IOReply (Just from) $ do
+        return . pure . SafeReply . IOReply (Just from) $ do
             -- read from our database
             msgs <- readMessages from
-            return . Just $ unlines msgs
-
-    -- basicly just aliases:
-    , text to <$> msum
-        [ string "fu"         >> return "Fuck you!"
-        , string "le-fu"      >> return "Le fu - we do not le rage so vulgarity. http://n-sch.de/lefu.png"
-        , string "faen"       >> return "http://www.youtube.com/watch?v=AkJf0md1kG8"
-        , string "perkele"    >> return "Perkele! http://www.youtube.com/watch?v=i9K2BxMsdm4"
-        ]
+            putStrLn . unlines $ map (\(c,f,m) -> formatTime defaultTimeLocale "%m-%d %R - " c ++ f ++ ": " ++ m) msgs
+            return $ Just "moep"
+    -}
 
     , do
         string "give"
@@ -113,51 +123,31 @@ commandsWithPrefix from to = msum
         to' <- many1 alphaNum
         spaces
         rpl <- commandsWithPrefix from (Just to')
-        case rpl of
-             SafeReply _ -> mzero   -- fail! we cannot give away "safe" replies
-             _           -> return rpl
+        let foo rpl = case rpl of
+                           SafeReply _ -> mzero   -- fail! we cannot give away "safe" replies
+                           _           -> return rpl
+        mapM foo rpl
 
 
     ]
 
-commandsWithoutPrefix :: String -> Maybe String -> Parser Reply
-commandsWithoutPrefix from to = msum []
+commandsWithoutPrefix :: String -> Maybe String -> Parser [Reply]
+commandsWithoutPrefix from to = msum
+
+    [ do
+        anyChar `manyTill` (string "http://" <|> string "www.")
+        url <- anyChar `manyTill` (spaces <|> eof)
+        return . pure . SafeReply . IOReply Nothing $ fmap (("Title: " ++) . take 150) <$> getTitleOfUrl url
+    ]
 
     {-
-    [ let
+    [ do
 
-          -- thats google stuff:
-          {-
-          parseTitle = manyTill anyChar (string "<h3 class=r>") *> manyTill onlyText (string "</h3>")
-          onlyText = (++) <$> manyTill anyChar (char '<') <* many (noneOf ">")
-                          <*> (onlyText <|> return [])
-          -}
-
-          -- no very sensible parser... :)
-          parseTitle = manyTill anyChar         (try $ string "<title>" <|> string "<TITLE>")
-                    *> manyTill (noneOf "</>")  (try $ string "</title" <|> string "</TITLE>")
-
-          getTitle url = do
-                res <- second (parse parseTitle "parseTitle") <$> curlGetString url [CurlFollowLocation True]
-                case res of
-                     (CurlOK, Right s) -> return . Just $ "Title: " ++ trunc s ++ " (" ++ url ++ ")"
-                     _                 -> return Nothing
-
-      in io Nothing . getTitle <$> (manyTill anyChar (try . lookAhead $ string "http://" <|> {- string "https://" <|> -} string "www.") *> many1 (noneOf " "))
-
+        return . pure . SafeReply . IOReply Nothing $ do
+            -- get the number of new messages
+            n <- newMessages from
+            if n > 0
+               then return . Just $ from ++ ": You have " ++ show n ++ " new message(s)! Call `read` to view them."
+               else mzero
     ]
-
-trunc s' =
-    let s = concat $ lines s'
-    in if length s > 80
-          then take 80 s ++ "..."
-          else s
-
-curl url = curlGetString url [CurlFollowLocation True, CurlMaxRedirs 20]
-
-unpackIO (Right (IOReply io)) = putStrLn "ok" >> io
-unpackIO _ = return Nothing
-
--}
-
-
+    -}
