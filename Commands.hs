@@ -95,12 +95,19 @@ commandsWithPrefix from to = msum
 
     -- basicly just aliases:
     [ pure . text to <$> msum
-        [ string "fu"         >> return "Fuck you!"
-        , string "le fu-"     >> return "Le fu-, we do not le rage so vulgarity. http://n-sch.de/lefu.png"
-        , string "faen"       >> return "http://www.youtube.com/watch?v=AkJf0md1kG8"
-        , string "perkele"    >> return "Perkele! http://www.youtube.com/watch?v=i9K2BxMsdm4"
-        , string "penis"      >> return "8========D"
+        [ string "fu"           >> return "Fuck you!"
+        , string "le-fu"        >> return "Le fu-, we do not le rage so vulgarity. http://n-sch.de/lefu.png"
+        , string "faen"         >> return "http://www.youtube.com/watch?v=AkJf0md1kG8"
+        , string "perkele"      >> return "Perkele! http://www.youtube.com/watch?v=i9K2BxMsdm4"
+        , string "penis"        >> return "8========D"
         ]
+
+    , do
+        string "help"
+        pure . text to <$> (<|>) (eof    >> return "translate give fu le-fu faen perkele penis")
+                                 (spaces >> msum [ string "translate"      >> return "translate (<word> | \"<string>\") [from] <language> [to | →] <language>"
+                                                 , string "give"           >> return "give <name> <command>"
+                                                 ])
 
     , do
         string "translate"
