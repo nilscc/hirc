@@ -105,7 +105,7 @@ commandsWithPrefix from to = msum
     , do
         string "help"
         pure . text to <$> (<|>) (eof    >> return "translate google give fu le-fu faen perkele penis")
-                                 (spaces >> msum [ string "translate"      >> return "translate (<word> | \"<string>\") [from] <language> [to | →] <language>"
+                                 (spaces >> msum [ string "translate"      >> return "translate <language> [to|→] <language> <string>"
                                                  , string "give"           >> return "give <name> <command>"
                                                  , string "google"         >> return "google <string>"
                                                  ])
@@ -114,16 +114,19 @@ commandsWithPrefix from to = msum
         string "translate"
         spaces
 
-        what  <- (char '"' *> manyTill anyChar (char '"')) <|> (manyTill anyChar (lookAhead space))
-        spaces
-        (string "from" >> spaces) <|> return ()
-
         from' <- many1 letter
         spaces
-        (string "to" >> spaces) <|> (char '→' >> spaces) <|> return ()
-
+        (string "to"   >> spaces) <|> (char '→' >> spaces) <|> return ()
         to'   <- many1 letter
-        return . pure . io to $ fmap (("Google translation: \"" ++).(++ "\"") . cutAt 100) <$> getGoogleTranslation from' to' what
+        spaces
+
+        what <- many1 anyChar
+        return . pure . io to $ do
+            trans <- getGoogleTranslation from' to' what
+            return $ case trans of
+                          Just (Left t)  -> Just t
+                          Just (Right t) -> Just $ "Google translation: " ++ cutAt 100 t
+                          _ -> Nothing
 
     , do
         string "google"

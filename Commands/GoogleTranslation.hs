@@ -25,7 +25,7 @@ googleAjaxURL from to text =
         to'   = urlEscape to
 
 -- | Perform the CURL 
-getGoogleTranslation :: Language -> Language -> String -> IO (Maybe String)
+getGoogleTranslation :: Language -> Language -> String -> IO (Maybe (Either String String))
 getGoogleTranslation from to text = do
     let
 
@@ -36,8 +36,8 @@ getGoogleTranslation from to text = do
     return $ case c of
                   (CurlOK, Right json) ->
                       case jsonToTranslation json of
-                           Nothing     -> Just $ "Couldn't translate: \"" ++ text ++ "\" from \"" ++ from ++ "\" to \"" ++ to ++ "\""
-                           translation -> translation
+                           Nothing     -> Just . Left $ "Couldn't translate: \"" ++ text ++ "\" from \"" ++ from ++ "\" to \"" ++ to ++ "\""
+                           translation -> fmap Right translation
                   _                    -> Nothing
 
 -- | Get the "translatedText" element out of our JSON object
