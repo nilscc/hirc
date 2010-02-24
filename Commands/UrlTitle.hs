@@ -30,7 +30,7 @@ getTitle xml =
          _ -> Nothing
 
   where justIfNotNull "" = Nothing
-        justIfNotNull a | length a > 150 = Just . (++ "...") $ take 150 a
+        justIfNotNull a | length a > 100 = Just . (++ "...") $ take 100 a
                         | otherwise      = Just a
 
         stripSpaces s = foldr step "" $ dropWhile isSpace s
