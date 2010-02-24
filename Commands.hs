@@ -18,6 +18,7 @@ import qualified Text.ParserCombinators.Parsec as P
 
 import Commands.Notes
 import Commands.UrlTitle
+import Utils
 
 type SendTo = Maybe String
 
@@ -58,7 +59,7 @@ parseCommand prefix from text = either (const []) id $
 -- Look for prefix, then parse commands
 --
 commands :: String -> String -> Parser [Reply]
-commands prefix from = (try (string prefix) *> commandsWithPrefix from Nothing) <|> commandsWithoutPrefix from Nothing
+commands prefix from = (try (string prefix) *> commandsWithPrefix from []) <|> commandsWithoutPrefix from []
 
 
 
@@ -72,19 +73,17 @@ string' = P.string
 spaces :: Parser ()
 spaces = skipMany1 space
 
-text to t =
-    case to of
-         Just nick -> TextReply Nothing (nick ++ ": " ++ t)
-         Nothing   -> TextReply Nothing t
+text :: [String] -> String -> Reply
+text [] t = TextReply Nothing t
+text to t = TextReply Nothing (concatWith ", " to ++ ": " ++ t)
 
-io to f =
-    case to of
-         Just nick -> IOReply Nothing (maybe Nothing (Just . (nick ++) . (": " ++)) <$> f)
-         Nothing   -> IOReply Nothing f
+io :: [String] -> IO (Maybe String) -> Reply
+io [] f = IOReply Nothing f
+io to f = IOReply Nothing (maybe Nothing (Just . (concatWith ", " to ++).(": " ++)) <$> f)
 
 -- }}}
 
-commandsWithPrefix :: String -> Maybe String -> Parser [Reply]
+commandsWithPrefix :: String -> [String] -> Parser [Reply]
 commandsWithPrefix from to = msum
 
     -- basicly just aliases:
@@ -117,12 +116,16 @@ commandsWithPrefix from to = msum
             return $ Just "moep"
     -}
 
+
     , do
         string "give"
         spaces
         to' <- many1 alphaNum
         spaces
-        rpl <- commandsWithPrefix from (Just to')
+        rpl <- commandsWithPrefix from $ if to' `elem` to
+                                            then to
+                                            else to ++ [to']
+
         let foo rpl = case rpl of
                            SafeReply _ -> mzero   -- fail! we cannot give away "safe" replies
                            _           -> return rpl
@@ -133,7 +136,7 @@ commandsWithPrefix from to = msum
     , commandsWithoutPrefix from to
     ]
 
-commandsWithoutPrefix :: String -> Maybe String -> Parser [Reply]
+commandsWithoutPrefix :: String -> [String] -> Parser [Reply]
 commandsWithoutPrefix from to = msum
 
     [ do
