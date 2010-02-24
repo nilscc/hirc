@@ -69,8 +69,9 @@ main = do
 
                                         -- _ -> return ()
 
-                     in mapM_ run $ parseCommand (nickName ++ ": ") nick text 
-                 return ()
+                     in mapM_ (\r -> run r >> threadDelay (1 * 1000000)) $ -- wait 1 second between each event
+                         parseCommand (nickName ++ ": ") nick text 
+                 threadDelay $ 1 * 1000000
              _ -> return ()
 
 --
