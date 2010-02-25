@@ -53,9 +53,8 @@ connect nick' user' realname host port = do
     msg <- newChan
     cmd <- newEmptyMVar
 
-    listenId <- forkIO . safe $
-        listenForMessage handle msg
-    forkIO . safe $ receiveCommand cmd handle listenId
+    listenId <- forkIO $ listenForMessage handle msg
+    forkIO $ receiveCommand cmd handle listenId
 
     putMVar cmd (Send $ nick nick')
     putMVar cmd (Send $ user user' "*" "*" realname)
@@ -69,7 +68,7 @@ receiveCommand :: MVar ConnectionCommand    -- ^ command mvar
                -> Handle                    -- ^ server handle
                -> ThreadId                  -- ^ thread id of listenForMessage
                -> IO ()
-receiveCommand cmd h listenId = forever $ do
+receiveCommand cmd h listenId = forever . safe Nothing $ do
 
     cmd <- takeMVar cmd
     case cmd of
@@ -93,17 +92,22 @@ receiveCommand cmd h listenId = forever $ do
 -- Listen on handle and put incoming messages to our Chan
 --
 listenForMessage :: Handle -> Chan Message -> IO ()
-listenForMessage handle msgChan = forever $ do
-    l <- hGetLine handle
+listenForMessage h msgChan = forever . safe (Just h) $ do
+    l <- hGetLine h
     case decode l of
          Just msg -> writeChan msgChan msg
          Nothing  -> return () -- todo
 
 --
--- Error handling
+-- Error handling, skip a char on error
 --
-safe :: IO () -> IO ()
-safe = E.handle (\(e :: E.IOException) -> return ())
+safe :: Maybe Handle -> IO () -> IO ()
+safe mh = E.handle (\(e :: E.IOException) -> putStrLn ("Exception in Connection: " ++ show e)
+                                          >> case mh of
+                                                  Just handle -> do hSetBinaryMode handle True
+                                                                    hGetChar handle -- skip char
+                                                                    hSetBinaryMode handle False
+                                                  _ -> return ())
 
 --
 -- Send a message
