@@ -71,7 +71,7 @@ main = do
 
 
                      -- wait 1 second between each event
-                     in mapM_ (\r -> run r >> threadDelay (1 * 1000000)) $ parseCommand prefix nick text 
+                     in mapM_ (\r -> run r) $ parseCommand prefix nick text 
 
                  return ()
 
@@ -81,7 +81,7 @@ main = do
 -- Catch exceptions
 --
 onException :: IO a -> IO a -> IO a
-onException f = E.handle (\(e :: E.IOException) -> f)
+onException f = E.handle (\(e :: E.IOException) -> putStrLn ("Exception in Main: " ++ show e) >> f)
 
 --
 -- Ignore exceptions

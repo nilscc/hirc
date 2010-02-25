@@ -100,10 +100,11 @@ commandsWithPrefix from to = msum
 
     [ do
         string "help"
-        pure . text to <$> (<|>) (eof    >> return "translate google give fu le-fu faen perkele penis")
+        pure . text to <$> (<|>) (eof    >> return "translate google fucking give coffee fu le-fu faen perkele penis")
                                  (spaces >> msum [ string "translate"      >> return "translate <language> [to|→] <language> <string>"
                                                  , string "give"           >> return "give <name> <command>"
                                                  , string "google"         >> return "google <string>"
+                                                 , string "fucking"        >> return "fucking <word>"
                                                  ])
 
     , do
@@ -125,7 +126,7 @@ commandsWithPrefix from to = msum
 
             let n  = maybe 1 (+1) $ M.lookup (from,what) m
             writeFile fname . show $ M.insert (from,what) n m
-            return . Just $ "You were angry about " ++ what ++ " " ++ show n ++ " times."
+            return . Just $ "You were angry about " ++ (concat $ lines what) ++ " " ++ show n ++ " times."
 
     , do
         string "translate"
