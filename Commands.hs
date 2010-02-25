@@ -11,7 +11,12 @@ import Control.Concurrent
 import Control.Monad
 import Data.Maybe (isNothing)
 import Data.Time
+import Data.Char
 import System.Locale
+import System.Directory
+import System.IO
+
+import qualified Data.Map as M
 
 import Text.ParserCombinators.Parsec hiding (many, optional, (<|>), string, spaces)
 import qualified Text.ParserCombinators.Parsec as P
@@ -93,22 +98,34 @@ cutAt n s | length s > n = take n s ++ "..."
 commandsWithPrefix :: String -> [String] -> Parser [Reply]
 commandsWithPrefix from to = msum
 
-    -- basicly just aliases:
-    [ pure . text to <$> msum
-        [ string "fu"           >> return "Fuck you!"
-        , string "le-fu"        >> return "Le fu-, we do not le rage so vulgarity. http://n-sch.de/lefu.png"
-        , string "faen"         >> return "http://www.youtube.com/watch?v=AkJf0md1kG8"
-        , string "perkele"      >> return "Perkele! http://www.youtube.com/watch?v=i9K2BxMsdm4"
-        , string "penis"        >> return "8========D"
-        ]
-
-    , do
+    [ do
         string "help"
         pure . text to <$> (<|>) (eof    >> return "translate google give fu le-fu faen perkele penis")
                                  (spaces >> msum [ string "translate"      >> return "translate <language> [to|→] <language> <string>"
                                                  , string "give"           >> return "give <name> <command>"
                                                  , string "google"         >> return "google <string>"
                                                  ])
+
+    , do
+        string "fucking"
+        spaces
+        what <- many1 $ satisfy (not . isSpace)
+        return . pure . io [] $ do
+
+            -- little with show & read :)
+            let fname = "fucking.data"
+            exists <- doesFileExist fname
+            m <- if exists
+                    then do h <- openFile fname ReadMode
+                            s <- hGetContents h
+                            last s `seq` return ()
+                            hClose h
+                            return (read s :: M.Map (String,String) Int)
+                    else return $ M.empty
+
+            let n  = maybe 1 (+1) $ M.lookup (from,what) m
+            writeFile fname . show $ M.insert (from,what) n m
+            return . Just $ "You were angry about " ++ what ++ " " ++ show n ++ " times."
 
     , do
         string "translate"
@@ -138,6 +155,7 @@ commandsWithPrefix from to = msum
             return $ case res of
                           Just (url,title) -> Just $ "Result: " ++ cutAt 100 title ++ " <" ++ url ++">"
                           _ -> Nothing
+
     {-
     , do
         string "tell"
@@ -174,6 +192,15 @@ commandsWithPrefix from to = msum
                            _           -> return rpl
         mapM foo rpl
 
+    -- basicly just aliases:
+    , pure . text to <$> msum
+        [ string "fu"           >> return "Fuck you!"
+        , string "le-fu"        >> return "Le fu-, we do not le rage so vulgarity. http://n-sch.de/lefu.png"
+        , string "faen"         >> return "http://www.youtube.com/watch?v=AkJf0md1kG8"
+        , string "perkele"      >> return "Perkele! http://www.youtube.com/watch?v=i9K2BxMsdm4"
+        , string "penis"        >> return "8========D"
+        , string "coffee"       >> return "Hmmm! So good. ☕"
+        ]
 
     -- try to parse everything without prefixes since we had no success with prefixes so far :)
     , commandsWithoutPrefix from to

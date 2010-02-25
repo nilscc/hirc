@@ -73,8 +73,8 @@ main = do
                      -- wait 1 second between each event
                      in mapM_ (\r -> run r >> threadDelay (1 * 1000000)) $ parseCommand prefix nick text 
 
-                 -- wait another 1 second before forking another thread/read a new message
-                 threadDelay $ 1 * 1000000
+                 return ()
+
              _ -> return ()
 
 --

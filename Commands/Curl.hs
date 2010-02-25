@@ -10,7 +10,7 @@ type XML = [Content]
 -- | Run curl and return the parsed XML
 performCurl :: URLString -> IO (Maybe XML)
 performCurl url = do
-    (r,s) <- curlGetString url [CurlFollowLocation True, CurlMaxRedirs 20]
+    (r,s) <- curlGetString url [CurlFollowLocation True, CurlMaxRedirs 20, CurlMaxFileSize (10*1024)]
     return $ case r of
                   CurlOK -> Just $ parseXML s
                   _      -> Nothing
