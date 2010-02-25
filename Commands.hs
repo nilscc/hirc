@@ -125,7 +125,7 @@ commandsWithPrefix from to = msum
             trans <- getGoogleTranslation from' to' what
             return $ case trans of
                           Just (Left t)  -> Just t
-                          Just (Right t) -> Just $ "Google translation: " ++ cutAt 100 t
+                          Just (Right t) -> Just $ "Translation: " ++ cutAt 100 t
                           _ -> Nothing
 
     , do
@@ -136,7 +136,7 @@ commandsWithPrefix from to = msum
         return . pure . io to $ do
             res <- getGoogleSearch qry
             return $ case res of
-                          Just (url,title) -> Just $ "Google search: \"" ++ cutAt 100 title ++ "\" <" ++ url ++">"
+                          Just (url,title) -> Just $ "Result: " ++ cutAt 100 title ++ " <" ++ url ++">"
                           _ -> Nothing
     {-
     , do

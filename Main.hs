@@ -41,9 +41,11 @@ main = do
                  send $ Join chan
                  putStrLn "OK"
 
-             Message { msg_command = "PRIVMSG", msg_prefix = Just (NickName nick _ _), msg_params = [chan, text] } -> do
+             Message { msg_command = "PRIVMSG", msg_prefix = Just (NickName nick _ _), msg_params = [chan', text] } -> do
 
-                 -- putStrLn $ chan ++ ": <" ++ nick ++ "> " ++ text
+                 -- handle private messages correctly
+                 let (prefix,chan) | chan' == nickName = ("", nick)
+                                   | otherwise         = (nickName ++ ": ", chan')
 
                  forkIO . onException (return ()) $
 
@@ -67,10 +69,11 @@ main = do
                                                  Just Nothing    -> putStrLn $ "Fail: No Function result"
                                                  _               -> putStrLn $ "Fail: Exception"
 
-                                        -- _ -> return ()
 
-                     in mapM_ (\r -> run r >> threadDelay (1 * 1000000)) $ -- wait 1 second between each event
-                         parseCommand (nickName ++ ": ") nick text 
+                     -- wait 1 second between each event
+                     in mapM_ (\r -> run r >> threadDelay (1 * 1000000)) $ parseCommand prefix nick text 
+
+                 -- wait another 1 second before forking another thread/read a new message
                  threadDelay $ 1 * 1000000
              _ -> return ()
 
