@@ -200,6 +200,7 @@ commandsWithPrefix from to = msum
         , string "faen"         >> return "http://www.youtube.com/watch?v=AkJf0md1kG8"
         , string "perkele"      >> return "Perkele! http://www.youtube.com/watch?v=i9K2BxMsdm4"
         , string "penis"        >> return "8========D"
+        , string "ping"         >> return "ln -s penis ping"
         , string "coffee"       >> return "Hmmm! So good. ☕"
         ]
 

@@ -34,7 +34,7 @@ turnIntoTuple (Object m) = do
     Array res    <- T.lookup (B.fromString "results") rdata
     case res of
          (Object result: _) -> do
-             String url   <- T.lookup (B.fromString "visibleUrl") result
+             String url   <- T.lookup (B.fromString "url") result
              String title <- T.lookup (B.fromString "title") result
              return (B.toString url, stripTags $ B.toString title)
          _ -> Nothing
