@@ -22,6 +22,7 @@ import Text.ParserCombinators.Parsec hiding (many, optional, (<|>), string, spac
 import qualified Text.ParserCombinators.Parsec as P
 
 import Commands.Notes
+import Commands.Json
 import Commands.UrlTitle
 import Commands.GoogleTranslation
 import Commands.GoogleSearch
@@ -66,7 +67,10 @@ parseCommand prefix from text = either (const []) id $
 -- Look for prefix, then parse commands
 --
 commands :: String -> String -> Parser [Reply]
-commands prefix from = (try (string prefix) *> commandsWithPrefix from []) <|> commandsWithoutPrefix from []
+commands prefix from = do
+    with    <- (try (string prefix) *> commandsWithPrefix from [])
+    without <- commandsWithoutPrefix from []
+    return $ with ++ without
 
 
 
@@ -100,7 +104,7 @@ commandsWithPrefix from to = msum
 
     [ do
         string "help"
-        pure . text to <$> (<|>) (eof    >> return "translate google fucking give coffee fu le-fu faen perkele penis")
+        pure . text to <$> (<|>) (eof    >> return "translate google fucking give")
                                  (spaces >> msum [ string "translate"      >> return "translate <language> [to|→] <language> <string>"
                                                  , string "give"           >> return "give <name> <command>"
                                                  , string "google"         >> return "google <string>"
@@ -194,18 +198,9 @@ commandsWithPrefix from to = msum
         mapM foo rpl
 
     -- basicly just aliases:
-    , pure . text to <$> msum
-        [ string "fu"           >> return "Fuck you!"
-        , string "le-fu"        >> return "Le fu-, we do not le rage so vulgarity. http://n-sch.de/lefu.png"
-        , string "faen"         >> return "http://www.youtube.com/watch?v=AkJf0md1kG8"
-        , string "perkele"      >> return "Perkele! http://www.youtube.com/watch?v=i9K2BxMsdm4"
-        , string "penis"        >> return "8========D"
-        , string "ping"         >> return "ln -s penis ping"
-        , string "coffee"       >> return "Hmmm! So good. ☕"
-        ]
-
-    -- try to parse everything without prefixes since we had no success with prefixes so far :)
-    , commandsWithoutPrefix from to
+    , do
+        str <- many1 anyChar
+        return . pure . io to $ readCommands "commands.json" str
     ]
 
 commandsWithoutPrefix :: String -> [String] -> Parser [Reply]
