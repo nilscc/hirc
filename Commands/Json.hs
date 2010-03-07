@@ -9,6 +9,7 @@ module Commands.Json
 import Data.List (find, isPrefixOf)
 import Data.Char
 import Text.JSON
+import System.Random
 
 -- | Get a value from a JSValue by its key
 (~>) :: JSValue -> JSValue -> Maybe JSValue
@@ -31,10 +32,15 @@ jObj = JSObject . toJSObject
 readCommands :: FilePath -> String -> IO (Maybe String)
 readCommands fp key = do
     f <- readFile fp
-    return $ case decodeStrict f of
-                  Ok json -> do -- Maybe monad
-                      JSString js <- json ~> jStr key
-                      return $ fromJSString js
-                  _       -> Nothing
+    case decodeStrict f of
+         Ok json -> case json ~> jStr key of
+                         Just (JSString js) -> return . Just $ fromJSString js
+                         Just (JSArray a@(x:xs)) -> do
+                             n <- randomRIO (0, length a - 1)
+                             case a !! n of
+                                  JSString js -> return . Just $ fromJSString js
+                                  _ -> return Nothing
+                         _ -> return Nothing
+         _       -> return $ Nothing
 
 

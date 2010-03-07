@@ -184,9 +184,9 @@ commandsWithPrefix from to = msum
 
 
     , do
-        string "give"
-        spaces
-        to' <- many1 alphaNum
+        -- use either "give" followed by necessary spaces or "," with optional spaces
+        (string "give" >> skipMany1 space) <|> (char ',' >> skipMany space)
+        to' <- many1 (alphaNum <|> oneOf "|_-'`^")
         spaces
         rpl <- commandsWithPrefix from $ if to' `elem` to
                                             then to
