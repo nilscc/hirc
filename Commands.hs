@@ -67,12 +67,7 @@ parseCommand prefix from text = either (const []) id $
 -- Look for prefix, then parse commands
 --
 commands :: String -> String -> Parser [Reply]
-commands prefix from = do
-    with    <- (try (string prefix) *> commandsWithPrefix from [])
-    without <- commandsWithoutPrefix from []
-    return $ with ++ without
-
-
+commands prefix from = (try (string prefix) *> commandsWithPrefix from []) <|> commandsWithoutPrefix from []
 
 --
 -- Little modification to the parsers default functions:
