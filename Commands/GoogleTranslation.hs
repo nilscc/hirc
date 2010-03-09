@@ -8,17 +8,19 @@ import Control.Applicative
 import Data.Char
 import Data.Maybe (fromMaybe)
 import Data.ByteString.Internal (c2w)
-import Text.HJson
+import Text.JSONb
 import Network.Curl
 
-import qualified Data.Map as M
+import qualified Data.ByteString.UTF8       as B8
+import qualified Data.Map                   as M
+import qualified Data.Trie                  as T
 
 import Utils
 
 type Language = String
 
 googleAjaxURL from to text = 
-    "http://ajax.googleapis.com/ajax/services/language/translate?v=1.0&q=" ++ text' ++ "&langpair=" ++ from' ++ "%7C" ++ to'
+    "http://ajax.googleapis.com/ajax/services/language/translate?v=1.0&q=" ++ (urlEscape text') ++ "&langpair=" ++ (urlEscape from') ++ "%7C" ++ (urlEscape to')
 
   where text' = urlEscape text
         from' = urlEscape from
@@ -32,7 +34,7 @@ getGoogleTranslation from to text = do
         from' = fromMaybe from $ languageByName from
         to'   = fromMaybe to   $ languageByName to
 
-    c <- (second fromString) <$> curlGetString (googleAjaxURL from' to' text) method_GET
+    c <- (second decode) <$> curlGetString_ (googleAjaxURL from' to' text) method_GET
     return $ case c of
                   (CurlOK, Right json) ->
                       case jsonToTranslation json of
@@ -41,14 +43,14 @@ getGoogleTranslation from to text = do
                   _                    -> Nothing
 
 -- | Get the "translatedText" element out of our JSON object
-jsonToTranslation :: Json -> Maybe String
-jsonToTranslation (JObject m) = do
-    JNumber status <- M.lookup "responseStatus" m
+jsonToTranslation :: JSON -> Maybe String
+jsonToTranslation (Object m) = do
+    Number status <- T.lookup (B8.fromString "responseStatus") m
     case status of
          200 -> do
-             JObject translated <- M.lookup "responseData" m
-             JString text       <- M.lookup "translatedText" translated
-             return . concat $ lines text
+             Object translated <- T.lookup (B8.fromString "responseData") m
+             String text       <- T.lookup (B8.fromString "translatedText") translated
+             return . concat . lines $ B8.toString text
          _ ->
              Nothing
 
