@@ -21,7 +21,7 @@ executable hirc
         json-b == 0.0.4,
         json == 0.4.*,
         HDBC == 2.2.*,
-        HDBC-sqlite3 == 2.2.*,
+        HDBC-sqlite3 == 2.*,
         xml == 1.3.*,
         random == 1.*,
         time == 1.*,
