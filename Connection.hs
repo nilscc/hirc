@@ -102,12 +102,12 @@ listenForMessage h msgChan = forever . safe (Just h) $ do
 -- Error handling, skip a char on error
 --
 safe :: Maybe Handle -> IO () -> IO ()
-safe mh = E.handle (\(e :: E.IOException) -> putStrLn ("Exception in Connection: " ++ show e)
-                                          >> case mh of
-                                                  Just handle -> do hSetBinaryMode handle True
-                                                                    hGetChar handle -- skip char
-                                                                    hSetBinaryMode handle False
-                                                  _ -> return ())
+safe mh = E.handle (\(e :: E.SomeException) -> putStrLn ("Exception in Connection: " ++ show e)
+                                            >> case mh of
+                                                    Just handle -> do hSetBinaryMode handle True
+                                                                      hGetChar handle -- skip char
+                                                                      hSetBinaryMode handle False
+                                                    _ -> return ())
 
 --
 -- Send a message

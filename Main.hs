@@ -81,7 +81,7 @@ main = do
 -- Catch exceptions
 --
 onException :: IO a -> IO a -> IO a
-onException f = E.handle (\(e :: E.IOException) -> putStrLn ("Exception in Main: " ++ show e) >> f)
+onException f = E.handle (\(e :: E.SomeException) -> putStrLn ("Exception in Main: " ++ show e) >> f)
 
 --
 -- Ignore exceptions
