@@ -12,9 +12,11 @@ import Control.Monad
 import Data.Maybe (isNothing)
 import Data.Time
 import Data.Char
+import Data.List (intercalate)
 import System.Locale
 import System.Directory
 import System.IO
+import Numeric
 
 import qualified Data.Map as M
 
@@ -99,11 +101,13 @@ commandsWithPrefix from to = msum
 
     [ do
         string "help"
-        pure . text to <$> (<|>) (eof    >> return "translate google fucking give")
+        pure . text to <$> (<|>) (eof    >> return "translate google fucking give chr ord")
                                  (spaces >> msum [ string "translate"      >> return "translate <language> [to|→] <language> <string>"
                                                  , string "give"           >> return "give <name> <command>"
                                                  , string "google"         >> return "google <string>"
                                                  , string "fucking"        >> return "fucking <word>"
+                                                 , string "chr"            >> return "chr <list of hex numbers>"
+                                                 , string "ord"            >> return "ord <string>"
                                                  ])
 
     , do
@@ -155,6 +159,23 @@ commandsWithPrefix from to = msum
             return $ case res of
                           Just (url,title) -> Just $ "Result: " ++ cutAt 100 title ++ " <" ++ url ++">"
                           _ -> Nothing
+
+    , do
+        string "chr"
+        spaces
+
+        s <- many anyChar
+        return . pure . text to $
+            let str = map chr $ read s
+            in str
+
+    , do
+        string "ord"
+        spaces
+        s <- many anyChar
+        return . pure . text to $
+            let hex = map (\c -> "0x" ++ showHex (ord c) "") s
+            in "[" ++ intercalate ", " hex ++ "]"
 
     {-
     , do
