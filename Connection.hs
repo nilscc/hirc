@@ -7,7 +7,7 @@ module Connection
 
     -- * Data types
     , ConnectionCommand (..)
-    , module Connection.Reconnects
+    , module Connection.Managed
     , module Network.IRC
     ) where
 
@@ -28,7 +28,7 @@ import System.IO.Unsafe
 import qualified Control.Exception as E
 import qualified Data.Set as S
 
-import Connection.Reconnects
+import Connection.Managed
 
 type To = String
 

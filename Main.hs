@@ -39,8 +39,8 @@ servers =
 --
 
 main = do
-  running <- mapM (runWithReconnects `flip` connectionLoop) servers
-  manageReconnects running connectionLoop
+  running <- mapM (runManaged `flip` connectionLoop) servers
+  manageConnections running connectionLoop
 
 put :: String -> IO ()
 put s = do

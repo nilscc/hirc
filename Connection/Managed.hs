@@ -1,11 +1,11 @@
-module Connection.Reconnects
+module Connection.Managed
   ( Reconnect (..)
-  , ManagedServer
   , stdReconnect
+  , ManagedServer
 
     -- * Running managed connections
-  , runWithReconnects
-  , manageReconnects
+  , runManaged
+  , manageConnections
   ) where
 
 import Control.Concurrent
@@ -23,24 +23,27 @@ stdReconnect t = Reconnect t 0 (60 * 60 * 6) Nothing
 
 -- | Start a server connection and prepare it to be managed by
 -- `manageReconnects`.
-runWithReconnects :: IrcServer 
-                  -> (IrcServer -> IO ())
-                  -> IO ManagedServer
-runWithReconnects srv connectionLoop = do
+runManaged :: IrcServer 
+           -> (IrcServer -> IO ())
+           -> IO ManagedServer
+runManaged srv connectionLoop = do
   waitForIt <- atomically newEmptyTMVar
   forkIO $
-    connectionLoop srv `E.finally` atomically (putTMVar waitForIt ())
+    connectionLoop srv `E.finally` do
+      now <- getCurrentTime
+      putStrLn $ "(" ++ show now ++ ") runManaged: connectionLoop crashed"
+      atomically $ putTMVar waitForIt ()
   return $ ManagedServer (srv, waitForIt)
 
 -- | Manage connections initiated by `runWithReconnects`
-manageReconnects :: [ManagedServer]
-                 -> (IrcServer -> IO ())
-                 -> IO ()
-manageReconnects srv_tm loop = do
+manageConnections :: [ManagedServer]
+                  -> (IrcServer -> IO ())
+                  -> IO ()
+manageConnections srv_tm loop = do
   newList <- join . atomically $ waitForSTM srv_tm loop
   case newList of
        [] -> return ()
-       _  -> manageReconnects newList loop
+       _  -> manageConnections newList loop
 
 --
 -- internals
