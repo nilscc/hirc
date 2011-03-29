@@ -42,12 +42,20 @@ main = do
   running <- mapM (runWithReconnects `flip` connectionLoop) servers
   manageReconnects running connectionLoop
 
+put :: String -> IO ()
+put s = do
+  now <- getCurrentTime
+  putStr $ "(" ++ show now ++ ") " ++ s
+
+putLn :: String -> IO ()
+putLn s = put $ s ++ "\n"
+
 connectionLoop :: IrcServer -> IO ()
 connectionLoop srv = do
 
   (read, send) <- connect nickName userName realName (host srv) (port srv)
 
-  putStrLn $ "Connected to: " ++ (host srv)
+  putLn $ "Connected to: " ++ (host srv)
 
   -- setup channels
   mapM_ (send . Join) (channels srv)
@@ -58,15 +66,15 @@ connectionLoop srv = do
     case msg of
          Message { msg_command = "PING" } -> do
 
-           -- putStr "Ping? "
+           -- put "Ping? "
            send Pong
-           -- putStrLn "Pong!"
+           -- putLn "Pong!"
 
          Message { msg_command = "INVITE", msg_params = [_,chan] } -> do
 
-           putStr $ "Joining: \"" ++ chan ++ "\"..."
+           put $ "Joining: \"" ++ chan ++ "\"..."
            send $ Join chan
-           putStrLn "OK"
+           putLn "OK"
 
          Message { msg_command = "PRIVMSG", msg_prefix = Just (NickName nick _ _), msg_params = [chan', text] } -> do
 
@@ -81,17 +89,17 @@ connectionLoop srv = do
                                   SafeReply rpl' -> run $ rpl'
 
                                   TextReply to str -> do
-                                    putStrLn $ "Sending text reply: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
+                                    putLn $ "Sending text reply: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
                                     mapM_ (send . PrivMsg (fromMaybe chan to)) (lines str)
 
                                   IOReply to io -> do
-                                    putStr "Running IO command..."
+                                    put "Running IO command..."
                                     s <- safe io
                                     case s of
-                                         Just (Just str) -> do putStrLn $ "OK! Sending: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
+                                         Just (Just str) -> do putLn $ "OK! Sending: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
                                                                send $ PrivMsg (fromMaybe chan to) str
-                                         Just Nothing    -> putStrLn $ "Fail: No Function result"
-                                         _               -> putStrLn $ "Fail: Exception"
+                                         Just Nothing    -> putLn $ "Fail: No Function result"
+                                         _               -> putLn $ "Fail: Exception"
 
 
                 -- wait 1 second between each event
@@ -107,7 +115,7 @@ connectionLoop srv = do
 
 -- | Catch exceptions
 onException :: IO a -> IO a -> IO a
-onException f = E.handle (\(e :: E.SomeException) -> putStrLn ("Exception in Main: " ++ show e) >> f)
+onException f = E.handle (\(e :: E.SomeException) -> putLn ("Exception in Main: " ++ show e) >> f)
 
 -- | Ignore exceptions and return `Nothing` if an exception occurs
 safe :: IO a -> IO (Maybe a)

@@ -23,6 +23,7 @@ import Data.Time
 import Network
 import Network.IRC
 import System.IO
+import System.IO.Unsafe
 
 import qualified Control.Exception as E
 import qualified Data.Set as S
@@ -45,17 +46,26 @@ data ConnectionCommand
 -- Logging
 --
 
+logChan :: Chan (FilePath, String)
+logChan = unsafePerformIO newChan
+
 logFile :: Handle -> FilePath
 logFile handle = "logs/" ++ show handle ++ ".log"
 
 log :: Handle -> String -> IO ()
-log h s = appendFile (logFile h) (s ++ "\n")
+log h s = do
+  now <- getCurrentTime
+  writeChan logChan (logFile h, "(" ++ show now ++ ") " ++ s ++ "\n")
 
 startLogging :: Handle -> IO ()
 startLogging h = do
   now <- getCurrentTime
   writeFile (logFile h) $
     "New logging session  --  " ++ show now ++ "\n\n"
+  forkIO $ do
+    (fp, s) <- readChan logChan
+    appendFile fp s
+  return ()
 
 --
 -- | Connect to a IRC server, returns two functions. The first one will return
@@ -148,7 +158,8 @@ listenForMessage h msgChan = forever . safe (Just h) $ do
 --
 safe :: Maybe Handle -> IO () -> IO ()
 safe mh = E.handle (\(e :: E.SomeException) -> do
-  putStrLn ("Exception in Connection: " ++ show e)
+  now <- getCurrentTime
+  putStrLn ("(" ++ show now ++ ") Exception in Connection: " ++ show e)
   case mh of
        Just handle -> do
          hSetBinaryMode handle True

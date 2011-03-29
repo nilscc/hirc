@@ -196,6 +196,7 @@ commandsWithPrefix from to = msum
         return . pure . SafeReply . IOReply (Just from) $ do
             -- read from our database
             msgs <- readMessages from
+            -- now <- getCurrentTime
             putStrLn . unlines $ map (\(c,f,m) -> formatTime defaultTimeLocale "%m-%d %R - " c ++ f ++ ": " ++ m) msgs
             return $ Just "moep"
 
