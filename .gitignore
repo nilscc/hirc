@@ -1,3 +1,5 @@
+logs/
+dist/
 *.o
 *.hi
 *.swp

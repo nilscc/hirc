@@ -27,7 +27,7 @@ import Commands.Notes
 import Commands.Json
 import Commands.UrlTitle
 import Commands.GoogleTranslation
-import Commands.GoogleSearch
+-- import Commands.GoogleSearch
 import Utils
 
 type SendTo = Maybe String
@@ -110,6 +110,7 @@ commandsWithPrefix from to = msum
                                                  , string "ord"            >> return "ord <string>"
                                                  ])
 
+    {-
     , do
         string "fucking"
         spaces
@@ -130,6 +131,7 @@ commandsWithPrefix from to = msum
             let n  = maybe 1 (+1) $ M.lookup (from,what) m
             writeFile fname . show $ M.insert (from,what) n m
             return . Just $ "You were angry about " ++ (concat $ lines what) ++ " " ++ show n ++ " times."
+    -}
 
     , do
         string "translate"
@@ -145,10 +147,11 @@ commandsWithPrefix from to = msum
         return . pure . io to $ do
             trans <- getGoogleTranslation from' to' what
             return $ case trans of
-                          Just (Left t)  -> Just t
-                          Just (Right t) -> Just $ "Translation: " ++ cutAt 100 t
+                          Just (Left t)  -> Just $ "Error: " ++ t
+                          Just (Right t) -> Just $ cutAt 150 t
                           _ -> Nothing
 
+    {-
     , do
         string "google"
         spaces
@@ -177,7 +180,6 @@ commandsWithPrefix from to = msum
             let hex = map (\c -> "0x" ++ showHex (ord c) "") s
             in "[" ++ intercalate ", " hex ++ "]"
 
-    {-
     , do
         string "tell"
         spaces
@@ -196,7 +198,6 @@ commandsWithPrefix from to = msum
             msgs <- readMessages from
             putStrLn . unlines $ map (\(c,f,m) -> formatTime defaultTimeLocale "%m-%d %R - " c ++ f ++ ": " ++ m) msgs
             return $ Just "moep"
-    -}
 
 
     , do
@@ -212,6 +213,7 @@ commandsWithPrefix from to = msum
                            SafeReply _ -> mzero   -- fail! we cannot give away "safe" replies
                            _           -> return rpl
         mapM foo rpl
+    -}
 
     -- basicly just aliases:
     , do
@@ -220,10 +222,13 @@ commandsWithPrefix from to = msum
     ]
 
 commandsWithoutPrefix :: String -> [String] -> Parser [Reply]
-commandsWithoutPrefix from to = msum
+commandsWithoutPrefix from to = choice
 
     [ do
-        anyChar `manyTill` (string "http://" <|> string "www.")
+        anyChar `manyTill` choice [ string "http://"
+                                  , string "https://"
+                                  , string "www."
+                                  ]
         url <- anyChar `manyTill` (spaces <|> eof)
         return . pure . IOReply Nothing $ fmap (("Title: " ++) . take 150) <$> getTitleOfUrl url
     ]

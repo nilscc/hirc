@@ -2,12 +2,15 @@ module Utils
     (
       concatWith
     , urlEscape
+    , delayUntil
     ) where
 
 import Data.Char
 import Data.Word
 import Data.Map ((!))
 import Data.ByteString.Internal (c2w)
+import Data.Time
+import Control.Concurrent
 import Network.URI
 
 import qualified Data.Map as M
@@ -35,3 +38,15 @@ urlEscape (c:cs) | c `elem` validChars = c : urlEscape cs
         escChar c  = '%' : map (m!) [c `div` 16, c `mod` 16]
         m          = M.fromList $ zip [0..] "0123456789abcdef"
 -}
+
+-- | Delay a thread until a given `UTCTime`
+delayUntil :: UTCTime -> IO ()
+delayUntil time = do
+  now <- getCurrentTime
+  let tdiff = diffUTCTime time now
+  if tdiff > 0 then do
+    -- delay for max. 5 minutes before checking again
+    threadDelay $ 1000000 * (round tdiff `mod` (5*60))
+    delayUntil time
+   else
+    return ()

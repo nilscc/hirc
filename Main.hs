@@ -1,90 +1,114 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Main () where
+module Main where
 
 import Control.Applicative
 import Control.Concurrent
+import Control.Concurrent.STM
 import Control.Monad
 import Data.Maybe (fromMaybe)
+import Data.Time
+import Network (PortNumber)
 
 import qualified Control.Exception as E
 
 import Connection
 import Commands
+import Types
+
+--
+-- IRC settings
+--
 
 nickName   = "hirc"
 userName   = "hirc"
 realName   = "hirc"
 
-hostName   = "irc.xinutec.org"
-port       = 6667
+servers :: [IrcServer]
+servers =
+  [ IrcServer "irc.freenode.org" 6667 (stdReconnect 3)
+              [ "##norsk" ]
+  , IrcServer "irc.xinutec.org"  6667 (stdReconnect 3)
+              [ "#linux", "#weirdshit" ]
+  , IrcServer "irc.quakenet.org" 6667 (stdReconnect 3)
+              [ "#dang0r" ]
+  ]
+
+--
+-- main
+--
 
 main = do
+  running <- mapM (runWithReconnects `flip` connectionLoop) servers
+  manageReconnects running connectionLoop
 
-    (read, send) <- connect nickName userName realName hostName port
+connectionLoop :: IrcServer -> IO ()
+connectionLoop srv = do
 
-    putStrLn $ "Connected to: " ++ hostName
+  (read, send) <- connect nickName userName realName (host srv) (port srv)
 
-    onException (send $ Quit Nothing) . forever $ do
+  putStrLn $ "Connected to: " ++ (host srv)
 
-        msg <- read
-        case msg of
-             Message { msg_command = "PING" } -> do
+  -- setup channels
+  mapM_ (send . Join) (channels srv)
 
-                 -- putStr "Ping? "
-                 send Pong
-                 -- putStrLn "Pong!"
+  onException (send $ Quit Nothing) . forever $ do
 
-             Message { msg_command = "INVITE", msg_params = [_,chan] } -> do
+    msg <- read
+    case msg of
+         Message { msg_command = "PING" } -> do
 
-                 putStr $ "Joining: \"" ++ chan ++ "\"..."
-                 send $ Join chan
-                 putStrLn "OK"
+           -- putStr "Ping? "
+           send Pong
+           -- putStrLn "Pong!"
 
-             Message { msg_command = "PRIVMSG", msg_prefix = Just (NickName nick _ _), msg_params = [chan', text] } -> do
+         Message { msg_command = "INVITE", msg_params = [_,chan] } -> do
 
-                 -- handle private messages correctly
-                 let (prefix,chan) | chan' == nickName = ("", nick)
-                                   | otherwise         = (nickName ++ ": ", chan')
+           putStr $ "Joining: \"" ++ chan ++ "\"..."
+           send $ Join chan
+           putStrLn "OK"
 
-                 forkIO . onException (return ()) $
+         Message { msg_command = "PRIVMSG", msg_prefix = Just (NickName nick _ _), msg_params = [chan', text] } -> do
 
-                     let
-                         run rpl = case rpl of
+           -- handle private messages correctly
+           let (prefix,chan) | chan' == nickName = ("", nick)
+                             | otherwise         = (nickName ++ ": ", chan')
 
-                                        SafeReply rpl' -> run $ rpl'
+           forkIO . onException (return ()) $
 
-                                        TextReply to str -> do
+               let run rpl = case rpl of
 
-                                            putStrLn $ "Sending text reply: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
-                                            mapM_ (send . PrivMsg (fromMaybe chan to)) (lines str)
+                                  SafeReply rpl' -> run $ rpl'
 
-                                        IOReply to io -> do
+                                  TextReply to str -> do
+                                    putStrLn $ "Sending text reply: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
+                                    mapM_ (send . PrivMsg (fromMaybe chan to)) (lines str)
 
-                                            putStr "Running IO command..."
-                                            s <- safe io
-                                            case s of
-                                                 Just (Just str) -> do putStrLn $ "OK! Sending: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
-                                                                       send $ PrivMsg (fromMaybe chan to) str
-                                                 Just Nothing    -> putStrLn $ "Fail: No Function result"
-                                                 _               -> putStrLn $ "Fail: Exception"
+                                  IOReply to io -> do
+                                    putStr "Running IO command..."
+                                    s <- safe io
+                                    case s of
+                                         Just (Just str) -> do putStrLn $ "OK! Sending: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
+                                                               send $ PrivMsg (fromMaybe chan to) str
+                                         Just Nothing    -> putStrLn $ "Fail: No Function result"
+                                         _               -> putStrLn $ "Fail: Exception"
 
 
-                     -- wait 1 second between each event
-                     in mapM_ (\r -> run r) $ parseCommand prefix nick text 
+                -- wait 1 second between each event
+                in mapM_ (\r -> run r) $ parseCommand prefix nick text 
 
-                 return ()
+           return ()
 
-             _ -> return ()
+         _ -> return ()
 
 --
--- Catch exceptions
+-- Exception handling
 --
+
+-- | Catch exceptions
 onException :: IO a -> IO a -> IO a
 onException f = E.handle (\(e :: E.SomeException) -> putStrLn ("Exception in Main: " ++ show e) >> f)
 
---
--- Ignore exceptions
---
+-- | Ignore exceptions and return `Nothing` if an exception occurs
 safe :: IO a -> IO (Maybe a)
 safe io = onException (return Nothing) (Just <$> io)
