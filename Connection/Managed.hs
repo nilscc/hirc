@@ -1,3 +1,5 @@
+{-# OPTIONS -fno-warn-unused-do-bind #-}
+
 module Connection.Managed
   ( Reconnect (..)
   , stdReconnect
@@ -17,14 +19,13 @@ import qualified Control.Exception as E
 import Types
 import Utils (delayUntil)
 
--- | Standard reconnect settings with 6 hours waiting time between retries
+-- | Standard reconnect settings with 6 hours delay between retries
 stdReconnect :: Int -> Reconnect
 stdReconnect t = Reconnect t 0 (60 * 60 * 6) Nothing
 
--- | Start a server connection and prepare it to be managed by
--- `manageReconnects`.
+-- | Start a new connection and prepare it to be managed by `manageConnections`
 runManaged :: IrcServer 
-           -> (IrcServer -> IO ())
+           -> (IrcServer -> IO ())          -- ^ connection loop
            -> IO ManagedServer
 runManaged srv connectionLoop = do
   waitForIt <- atomically newEmptyTMVar
@@ -37,10 +38,10 @@ runManaged srv connectionLoop = do
 
 -- | Manage connections initiated by `runWithReconnects`
 manageConnections :: [ManagedServer]
-                  -> (IrcServer -> IO ())
+                  -> (IrcServer -> IO ())   -- ^ connection loop
                   -> IO ()
 manageConnections srv_tm loop = do
-  newList <- join . atomically $ waitForSTM srv_tm loop
+  newList <- join . atomically $ waitForSTM [] srv_tm loop
   case newList of
        [] -> return ()
        _  -> manageConnections newList loop
@@ -50,15 +51,15 @@ manageConnections srv_tm loop = do
 --
 
 waitForSTM :: [ManagedServer]
+           -> [ManagedServer]
            -> (IrcServer -> IO ())
            -> STM (IO [ManagedServer])
-waitForSTM [] _ =
-  retry
-waitForSTM (ManagedServer (srv,tm):r) loop =
+waitForSTM _ [] _ = retry
+waitForSTM waiting (mgd@(ManagedServer (srv,tm)):r) loop =
   orElse
-    (do x <- takeTMVar tm
-        return $ restartOrDelay srv tm r loop)
-    (waitForSTM r loop)
+    (do _ <- takeTMVar tm
+        return $ restartOrDelay srv tm (waiting ++ r) loop)
+    (waitForSTM (waiting ++ [mgd]) r loop)
 
 restartOrDelay :: IrcServer
                -> TMVar ()
@@ -70,13 +71,13 @@ restartOrDelay srv tm r loop =
     return (ManagedServer (newSrv,tm) : r)
    else do
     now <- getCurrentTime
-    case last of
+    case l of
          Nothing -> restartSrv now
          Just t
            | addUTCTime wait t <= now -> restartSrv now
            | otherwise                -> delaySrv (addUTCTime wait t)
   where
-    rec@(Reconnect times count wait last) = reconnects srv
+    rec@(Reconnect times count wait l) = reconnects srv
     newRec = rec { recCount = count + 1 }
     newSrv = srv { reconnects = newRec }
 
