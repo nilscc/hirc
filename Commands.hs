@@ -93,13 +93,13 @@ commandsWithPrefix _from to = msum
 
     [ do
         string "help"
-        pure . text to <$> (<|>) (eof    >> return "translate google fucking give chr ord")
+        pure . text to <$> (<|>) (eof    >> return "translate") -- google fucking give chr ord")
                                  (spaces >> msum [ string "translate"      >> return "translate <language> [to|→] <language> <string>"
-                                                 , string "give"           >> return "give <name> <command>"
-                                                 , string "google"         >> return "google <string>"
-                                                 , string "fucking"        >> return "fucking <word>"
-                                                 , string "chr"            >> return "chr <list of hex numbers>"
-                                                 , string "ord"            >> return "ord <string>"
+                                                 -- , string "give"           >> return "give <name> <command>"
+                                                 -- , string "google"         >> return "google <string>"
+                                                 -- , string "fucking"        >> return "fucking <word>"
+                                                 -- , string "chr"            >> return "chr <list of hex numbers>"
+                                                 -- , string "ord"            >> return "ord <string>"
                                                  ])
 
     {-
@@ -223,7 +223,7 @@ commandsWithoutPrefix _from _to = choice
                                   , string "www."
                                   ]
         url <- anyChar `manyTill` (spaces <|> eof)
-        return . pure . IOReply Nothing $ fmap (("Title: " ++) . take 150) <$> getTitleOfUrl url
+        return . pure . IOReply Nothing $ fmap (("Title: " ++) . take 150) <$> getTitle url
     ]
 
     {-

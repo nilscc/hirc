@@ -22,7 +22,6 @@ executable hirc
         curl == 1.*,
         JSONb == 1.*,
         json == 0.4.*,
-        xml == 1.*,
         random == 1.*,
         time == 1.*,
         directory == 1.*,
@@ -36,7 +35,9 @@ executable hirc
         aeson == 0.3.*,
         stm == 2.*,
         mstate == 0.2.*,
-        monad-peel == 0.1.*
+        monad-peel == 0.1.*,
+        tagsoup == 0.*
+
 
 source-repository head
     type:         git

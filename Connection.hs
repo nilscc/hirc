@@ -18,7 +18,7 @@ module Connection
     ) where
 
 
-import Prelude hiding (catch, log)
+import Prelude hiding (catch)
 
 import Control.Applicative
 import Control.Monad
@@ -68,7 +68,7 @@ connect nick' user' realname = do
   waitFor001 :: Hirc ()
   waitFor001 = do
     msg <- getMsg
-    logH $ "waitFor001 --- " ++ show msg
+    logM 3 $ "waitFor001 --- " ++ show msg
     case msg of
          Message { msg_command = "001" } -> return ()
          _                               -> waitFor001
@@ -85,17 +85,21 @@ getMsg = do
   msg <- asks msgChan
   liftIO $ readChan msg
 
+sendMsg :: Message -> Hirc ()
+sendMsg m = requireHandle $ \h -> liftIO . hPutStrLn h $ encode m
+
 -- Wait for commands, execute them
 receiveCommand :: Hirc ()
 receiveCommand = forever . requireHandle $ \h -> do
 
   cmd <- asks cmdChan
   c   <- liftIO $ readChan cmd
-  logH $ "receiveCommand --- " ++ show c
+  logM 3 $ "receiveCommand --- " ++ show c
   case c of
 
        Send msg           -> sendMsg $ msg
        PrivMsg to msg     -> sendMsg $ privmsg to msg
+       Notice to msg      -> sendMsg $ notice to msg
        Join chan          -> sendMsg $ joinChan chan
        Part chan          -> sendMsg $ part chan
 
@@ -110,11 +114,17 @@ receiveCommand = forever . requireHandle $ \h -> do
          -- error will (hopefully) get cought
          throwError H_ConnectionLost
 
+mkMessage :: String -> [Parameter] -> Message
+mkMessage cmd params = Message Nothing cmd params
+
+notice :: To -> String -> Message
+notice t s = mkMessage "NOTICE" [t,s]
+
 -- Listen on handle and put incoming messages to our Chan
 listenForMessages :: Hirc ()
 listenForMessages = forever $ do
   l <- safeGetLine
-  logH $ "listenForMessage --- " ++ show l
+  logM 3 $ "listenForMessage --- " ++ show l
   case join $ fmap decode l of
        Just m  -> do
          msg <- asks msgChan
@@ -125,10 +135,6 @@ safeGetLine :: Hirc (Maybe String)
 safeGetLine = requireHandle $ \h ->
   either (\(_::SomeException) -> Nothing) Just <$>
     liftIO (try $ hGetLine h)
-
--- Send a message
-sendMsg :: Message -> Hirc ()
-sendMsg m = requireHandle $ \h -> liftIO . hPutStrLn h $ encode m
 
 --
 -- Other

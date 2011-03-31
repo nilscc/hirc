@@ -1,76 +1,70 @@
+{-# LANGUAGE FlexibleContexts #-}
 
-module Logging where
+module Logging
+  ( logM
+  , startLogging
+    -- * Log settings
+  , debugHircSettings
+  , debugManagedSettings
+  ) where
 
 import Control.Concurrent.Chan
+import Control.Concurrent.MState
 import Control.Monad
 import Control.Monad.Trans
 import Data.Time
+import System.Directory
 
 import Hirc
+
+--
+-- Settings
+--
+
+debugHircSettings :: IrcServer -> LogSettings
+debugHircSettings srv = LogSettings
+  { logLevel      = 3
+  , logPrintLevel = 1
+  , logFile       = "logs/" ++ host srv ++ "_" ++ show (port srv) ++ ".log"
+  }
+
+debugManagedSettings :: LogSettings
+debugManagedSettings = LogSettings
+  { logLevel      = 3
+  , logPrintLevel = 2
+  , logFile       = "logs/managed.log"
+  }
 
 --
 -- Logging: Hirc
 --
 
-logH :: String -> Hirc ()
-logH s = do
-  ml <- gets loggingH
-  case ml of
-       Just l  -> l s
-       Nothing -> startLoggingH >> logH s
+-- | Log a message
+logM :: LogM m => Int -> String -> m ()
+logM l s = do
+  now <- liftIO getCurrentTime
+  let f = "(" ++ show now ++ ") " ++ s
+  lc <- logChan
+  liftIO $ writeChan lc (l,f)
 
-startLoggingH :: Hirc ()
-startLoggingH = do
-  IrcServer
-    { host = h
-    , port = p
-    } <- asks server
-  let logFile = "logs/" ++ h ++ "_" ++ show p ++ ".log"
+logLoop :: LogM m => m ()
+logLoop = do
+  lc <- logChan
+  LogSettings lF lP fp <- logSettings
+  now <- liftIO getCurrentTime
+  liftIO $
+    writeFile fp $ "New logging session [" ++ show now ++ "]\n\n"
+  forever $ do
+    (l,s) <- liftIO $ readChan lc
+    when (l <= lF) $
+      liftIO $ appendFile fp (s++"\n")
+    when (l <= lP) $
+      liftIO $ putStrLn s
 
-  now <- liftIO $ getCurrentTime
-  liftIO $ writeFile logFile $
-    "New logging session  --  " ++ show now ++ "\n\n"
-
-  logChan <- liftIO newChan
-  _ <- forkM . forever . liftIO $ do
-    s <- readChan logChan
-    appendFile logFile s
-
-  let log' s = liftIO $ do
-        t <- getCurrentTime
-        writeChan logChan $
-          "(" ++ show t ++ ") " ++ s ++ "\n"
-
-  modifyM $ \s -> s { loggingH = Just log' }
-
-
---
--- Logging: Managed
---
-
-logM :: String -> Managed ()
-logM s = do
-  ml <- gets loggingM
-  case ml of
-       Just l  -> l s
-       Nothing -> startLoggingM >> logM s
-
-startLoggingM :: Managed ()
-startLoggingM = do
-  let logFile = "logs/managed.log"
-
-  now <- liftIO $ getCurrentTime
-  liftIO $ writeFile logFile $
-    "New logging session  --  " ++ show now ++ "\n\n"
-
-  logChan <- liftIO newChan
-  _ <- forkM . forever . liftIO $ do
-    s <- readChan logChan
-    appendFile logFile s
-
-  let log' s = liftIO $ do
-        t <- getCurrentTime
-        writeChan logChan $
-          "(" ++ show t ++ ") " ++ s ++ "\n"
-  modifyM $ \m ->  m { loggingM = Just log' }
-
+-- | Start the log loop in a `MState` thread
+startLogging :: (LogM (MState t m), Forkable m) => MState t m ()
+startLogging = do
+  liftIO $ do
+    e <- doesDirectoryExist "logs"
+    unless e $ createDirectory "logs"
+  forkM logLoop >> return ()

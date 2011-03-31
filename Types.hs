@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeSynonymInstances #-}
+
 module Types where
 
 import Control.Concurrent.Chan
@@ -35,6 +37,7 @@ type To = Nickname
 data ConnectionCommand
   = Send Message
   | PrivMsg To String  -- ^ private message
+  | Notice To String
   | Join Channel
   | Part Channel
   | Ping
@@ -44,15 +47,18 @@ data ConnectionCommand
 
 -- The Managed monad
 
-type Managed a = MState ManagedState IO a
+type Managed = MState ManagedState (ReaderT ManagedSettings IO)
 
 data ManagedState = ManagedState
-  { loggingM      :: Maybe (String -> Managed ())
+
+data ManagedSettings = ManagedSettings
+  { logChanM      :: Chan (Int,String)
+  , logSettingsM  :: LogSettings
   }
 
 -- The Hirc monad
 
-type Hirc a = MState HircState (ReaderT HircSettings (ErrorT HircError IO)) a
+type Hirc = MState HircState (ReaderT HircSettings (ErrorT HircError IO))
 
 data HircError
   = H_NotConnected
@@ -70,10 +76,30 @@ data HircSettings = HircSettings
   , msgChan         :: Chan Message
   , errMVar         :: MVar HircError
   , runH            :: Hirc ()
-  -- , disconnectH     :: Hirc ()
+  , logChanH        :: Chan (Int,String)
+  , logSettingsH    :: LogSettings
   }
 
 data HircState = HircState
   { connectedHandle :: Maybe Handle
-  , loggingH        :: Maybe (String -> Hirc ())
+  }
+
+-- Logging
+
+class MonadIO m => LogM m where
+  logChan     :: m (Chan (Int,String))
+  logSettings :: m LogSettings
+
+instance LogM Hirc where
+  logChan     = asks logChanH
+  logSettings = asks logSettingsH
+
+instance LogM Managed where
+  logChan     = asks logChanM
+  logSettings = asks logSettingsM
+
+data LogSettings = LogSettings
+  { logLevel      :: Int
+  , logPrintLevel :: Int
+  , logFile       :: FilePath
   }

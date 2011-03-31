@@ -12,27 +12,33 @@ import Control.Concurrent
 import Control.Concurrent.MState
 import Control.Monad.Error
 import Control.Monad.Reader
-import Data.Time
+-- import Data.Time
 
 import Hirc
 import Logging
-import Utils
+-- import Utils
 
 --
 -- Run MStates
 --
 
 run :: Managed a -> IO a
-run m = evalMState (startLoggingM >> m) defState
+run m = do
+    c <- newChan
+    let settings = ManagedSettings
+          { logChanM     = c
+          , logSettingsM = debugManagedSettings
+          }
+    runReaderT (evalMState (startLogging >> m) defState) settings
   where
     defState :: ManagedState
-    defState = ManagedState Nothing
+    defState = ManagedState
 
 runHirc :: HircSettings -> Hirc a -> IO (Either HircError a)
 runHirc s r = runErrorT (runReaderT (evalMState r defState) s)
   where
     defState :: HircState
-    defState = HircState Nothing Nothing
+    defState = HircState Nothing
 
 runHircWithSettings :: HircSettings -> Hirc () -> Managed ()
 runHircWithSettings settings hirc = do
@@ -40,6 +46,7 @@ runHircWithSettings settings hirc = do
   case merr of
        Left err -> handleHircError err settings hirc
        Right _  -> return ()
+
 
 -- | Start a new connection and prepare it to be managed by `manageConnections`
 manage :: IrcServer
@@ -49,16 +56,20 @@ manage srv hirc = do
   cmd <- liftIO newChan
   msg <- liftIO newChan
   err <- liftIO newEmptyMVar
+  lc  <- liftIO newChan
   let settings = HircSettings
-        { server  = srv
-        , cmdChan = cmd
-        , msgChan = msg
-        , errMVar = err
-        , runH    = hirc
+        { server       = srv
+        , cmdChan      = cmd
+        , msgChan      = msg
+        , errMVar      = err
+        , runH         = hirc
+        , logChanH     = lc
+        , logSettingsH = debugHircSettings srv
         }
   forkM $
-    runHircWithSettings settings (startLoggingH >> hirc)
-  return ()
+    runHircWithSettings settings (startLogging >> hirc)
+  logM 1 $ "Managing new server: " ++ host srv ++ ":" ++ show (port srv)
+
 
 --
 -- Error handling
@@ -69,6 +80,7 @@ handleHircError :: HircError
                 -> Hirc ()
                 -> Managed ()
 
+{-
 handleHircError H_ConnectionLost s hirc = do
   let srv = server s
       rec@(Reconnect t c w l) = reconnects srv
@@ -104,6 +116,7 @@ handleHircError H_ConnectionLost s hirc = do
       let srv    = server settings
           newSrv = srv { reconnects = newRec }
        in settings { server = newSrv }
+-}
 
 handleHircError e _ _ = do
-  logM $ "Unknown error caught: " ++ show e
+  logM 1 $ "Unknown error caught: " ++ show e

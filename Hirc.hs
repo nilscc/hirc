@@ -10,6 +10,7 @@ module Hirc
     -- ** Managed types
   , Managed
   , ManagedState (..)
+  , ManagedSettings (..)
     -- ** Connection types
   , IrcServer (..)
   , Reconnect (..)
@@ -18,6 +19,9 @@ module Hirc
   , Username
   , Realname
   , To
+    -- ** Logging
+  , LogM (..)
+  , LogSettings (..)
 
     -- * Reexports
     -- ** MState functions
