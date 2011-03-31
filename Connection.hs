@@ -4,6 +4,9 @@ module Connection
     (
     -- * start connection
       connect
+    , sendCmd
+    , sendMsg
+    , getMsg
 
     -- * Data types
     , ConnectionCommand (..)
@@ -16,159 +19,116 @@ import Prelude hiding (log)
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.Error
 import Control.Concurrent
-import Control.Concurrent.Chan
-import Control.Concurrent.MVar
-import Data.Time
+import Control.Exception.Peel
 import Network
 import Network.IRC
 import System.IO
-import System.IO.Unsafe
-
-import qualified Control.Exception as E
-import qualified Data.Set as S
 
 import Connection.Managed
+import Logging
+import Hirc
 
-type To = String
-
-data ConnectionCommand
-  = Send Message
-  | PrivMsg To String  -- ^ private message
-  | Join Channel
-  | Part Channel
-  | Ping
-  | Pong
-  | Quit (Maybe String)
-  deriving Show
-
---
--- Logging
---
-
-logChan :: Chan (FilePath, String)
-logChan = unsafePerformIO newChan
-
-logFile :: Handle -> FilePath
-logFile handle = "logs/" ++ show handle ++ ".log"
-
-log :: Handle -> String -> IO ()
-log h s = do
-  now <- getCurrentTime
-  writeChan logChan (logFile h, "(" ++ show now ++ ") " ++ s ++ "\n")
-
-startLogging :: Handle -> IO ()
-startLogging h = do
-  now <- getCurrentTime
-  writeFile (logFile h) $
-    "New logging session  --  " ++ show now ++ "\n\n"
-  forkIO $ do
-    (fp, s) <- readChan logChan
-    appendFile fp s
-  return ()
-
---
 -- | Connect to a IRC server, returns two functions. The first one will return
 -- incoming messages, the second will handle commands
---
 connect :: UserName     -- ^ nick
         -> UserName     -- ^ user
         -> UserName     -- ^ realname
-        -> HostName     -- ^ irc server
-        -> PortNumber   -- ^ port
-        -> IO (IO Message, ConnectionCommand -> IO ())
-connect nick' user' realname host port = do
+        -> Hirc ()
+connect nick' user' realname = do
 
-  handle <- connectTo host (PortNumber port)
-  hSetBuffering handle LineBuffering
-  hSetBinaryMode handle False
+  srv <- asks server
+  h <- liftIO $ connectTo (host srv) (PortNumber (port srv))
+  liftIO $ do
+    hSetBuffering h LineBuffering
+    hSetBinaryMode h False
+  modifyM $ \s -> s { connectedHandle = Just h }
 
-  -- logging
-  startLogging handle
+  _ <- forkM listenForMessages
+  _ <- forkM receiveCommand
 
-  msg <- newChan
-  cmd <- newChan
+  sendCmd $ Send (nick nick')
+  sendCmd $ Send (user user' "*" "*" realname)
 
-  listenId <- forkIO $
-    listenForMessage handle msg
-  forkIO $
-    receiveCommand cmd handle listenId
+  waitFor001
 
-  writeChan cmd (Send $ nick nick')
-  writeChan cmd (Send $ user user' "*" "*" realname)
+  return ()
+ where
+  -- Wait for the 001 message before "giving away" our connection
+  waitFor001 :: Hirc ()
+  waitFor001 = do
+    msg <- getMsg
+    logH $ "waitFor001 --- " ++ show msg
+    case msg of
+         Message { msg_command = "001" } -> return ()
+         _                               -> waitFor001
 
-  waitFor001 (readChan msg) (log handle)
+-- Sending/receiving commands/messages
 
-  return (readChan msg, writeChan cmd)
+sendCmd :: ConnectionCommand -> Hirc ()
+sendCmd c = do
+  cmd <- asks cmdChan
+  liftIO $ writeChan cmd c
 
---
--- Wait for the 001 message before "giving away" our connection
---
-waitFor001 :: IO Message
-           -> (String -> IO ())
-           -> IO ()
-waitFor001 getMsg log' = do
-  msg <- getMsg
-  log' $ "waitFor001 --- " ++ show msg
-  case msg of
-       Message { msg_command = "001" } -> return ()
-       _                               -> waitFor001 getMsg log'
+getMsg :: Hirc Message
+getMsg = do
+  msg <- asks msgChan
+  liftIO $ readChan msg
 
---
 -- Wait for commands, execute them
---
-receiveCommand :: Chan ConnectionCommand    -- ^ command channel
-               -> Handle                    -- ^ server handle
-               -> ThreadId                  -- ^ thread id of listenForMessage
-               -> IO ()
-receiveCommand cmd h listenId = forever . safe Nothing $ do
+receiveCommand :: Hirc ()
+receiveCommand = forever . requireHandle $ \h -> do
 
-  cmd <- readChan cmd
-  log h $ "receiveCommand --- " ++ show cmd
-  case cmd of
+  cmd <- asks cmdChan
+  c   <- liftIO $ readChan cmd
+  logH $ "receiveCommand --- " ++ show c
+  case c of
 
-       Send msg           -> send h $ msg
-       PrivMsg to msg     -> send h $ privmsg to msg
-       Join chan          -> send h $ joinChan chan
-       Part chan          -> send h $ part chan
+       Send msg           -> sendMsg $ msg
+       PrivMsg to msg     -> sendMsg $ privmsg to msg
+       Join chan          -> sendMsg $ joinChan chan
+       Part chan          -> sendMsg $ part chan
 
-       Ping               -> send h $ Message Nothing "PING" []
-       Pong               -> send h $ Message Nothing "PONG" []
+       Ping               -> sendMsg $ Message Nothing "PING" []
+       Pong               -> sendMsg $ Message Nothing "PONG" []
 
        Quit msg           -> do
          -- shutdown everything
-         send h $ quit msg
-         killThread listenId
-         hClose h
-         fail "receiveCommand: Shutting down" -- exception will (hopefully) get cought
+         sendMsg $ quit msg
+         liftIO $ hClose h
+         modifyM $ \s -> s { connectedHandle = Nothing }
+         -- error will (hopefully) get cought
+         throwError H_ConnectionLost
 
---
 -- Listen on handle and put incoming messages to our Chan
---
-listenForMessage :: Handle -> Chan Message -> IO ()
-listenForMessage h msgChan = forever . safe (Just h) $ do
-  l <- hGetLine h
-  log h $ "listenForMessage --- " ++ l
-  case decode l of
-       Just msg -> writeChan msgChan msg
-       Nothing  -> return () -- todo
+listenForMessages :: Hirc ()
+listenForMessages = forever $ do
+  l <- safeGetLine
+  logH $ "listenForMessage --- " ++ show l
+  case join $ fmap decode l of
+       Just m  -> do
+         msg <- asks msgChan
+         liftIO $ writeChan msg m
+       Nothing -> return () -- todo
 
---
--- Error handling, skip a char on error
---
-safe :: Maybe Handle -> IO () -> IO ()
-safe mh = E.handle (\(e :: E.SomeException) -> do
-  now <- getCurrentTime
-  putStrLn ("(" ++ show now ++ ") Exception in Connection: " ++ show e)
-  case mh of
-       Just handle -> do
-         hSetBinaryMode handle True
-         hGetChar handle -- skip char
-         hSetBinaryMode handle False
-       _ -> return ())
+safeGetLine :: Hirc (Maybe String)
+safeGetLine = requireHandle $ \h ->
+  either (\(_::SomeException) -> Nothing) Just <$>
+    liftIO (try $ hGetLine h)
 
---
 -- Send a message
+sendMsg :: Message -> Hirc ()
+sendMsg m = requireHandle $ \h -> liftIO . hPutStrLn h $ encode m
+
 --
-send :: Handle -> Message -> IO ()
-send h = hPutStrLn h . encode
+-- Other
+--
+
+requireHandle :: (Handle -> Hirc a)
+              -> Hirc a
+requireHandle hirc = do
+  mh <- gets connectedHandle
+  case mh of
+       Just h  -> hirc h
+       Nothing -> throwError H_NotConnected

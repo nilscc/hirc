@@ -1,3 +1,5 @@
+-- TODO: Fix!
+
 module Commands.UrlTitle
     (
     -- * Pure operations
@@ -7,7 +9,6 @@ module Commands.UrlTitle
     , getTitleOfUrl
     ) where
 
-import Control.Monad
 import Data.Char
 import Text.XML.Light
 
@@ -31,9 +32,9 @@ getTitle xml =
                         | otherwise      = Just a
 
         stripSpaces s = foldr step "" $ dropWhile isSpace s
-          where step s "" | isSpace s = ""
-                          | otherwise = [s]
-                step s r = s : r
+          where step x "" | isSpace x = ""
+                          | otherwise = [x]
+                step x r = x : r
 
         concatWith s = foldr step ""
           where step "" b = b

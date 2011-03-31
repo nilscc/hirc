@@ -3,96 +3,112 @@
 module Connection.Managed
   ( Reconnect (..)
   , stdReconnect
-  , ManagedServer
 
     -- * Running managed connections
-  , runManaged
-  , manageConnections
+  , run
+  , manage
   ) where
 
 import Control.Concurrent
-import Control.Concurrent.STM
-import Control.Monad
+import Control.Concurrent.MState
+import Control.Monad.Error
+import Control.Monad.Reader
 import Data.Time
-import qualified Control.Exception as E
 
-import Types
-import Utils (delayUntil)
+import Hirc
+import Logging
+import Utils
 
 -- | Standard reconnect settings with 6 hours delay between retries
 stdReconnect :: Int -> Reconnect
 stdReconnect t = Reconnect t 0 (60 * 60 * 6) Nothing
 
--- | Start a new connection and prepare it to be managed by `manageConnections`
-runManaged :: IrcServer 
-           -> (IrcServer -> IO ())          -- ^ connection loop
-           -> IO ManagedServer
-runManaged srv connectionLoop = do
-  waitForIt <- atomically newEmptyTMVar
-  forkIO $
-    connectionLoop srv `E.finally` do
-      now <- getCurrentTime
-      putStrLn $ "(" ++ show now ++ ") runManaged: connectionLoop crashed"
-      atomically $ putTMVar waitForIt ()
-  return $ ManagedServer (srv, waitForIt)
-
--- | Manage connections initiated by `runWithReconnects`
-manageConnections :: [ManagedServer]
-                  -> (IrcServer -> IO ())   -- ^ connection loop
-                  -> IO ()
-manageConnections srv_tm loop = do
-  newList <- join . atomically $ waitForSTM [] srv_tm loop
-  case newList of
-       [] -> return ()
-       _  -> manageConnections newList loop
-
 --
--- internals
+-- Run MStates
 --
 
-waitForSTM :: [ManagedServer]
-           -> [ManagedServer]
-           -> (IrcServer -> IO ())
-           -> STM (IO [ManagedServer])
-waitForSTM _ [] _ = retry
-waitForSTM waiting (mgd@(ManagedServer (srv,tm)):r) loop =
-  orElse
-    (do _ <- takeTMVar tm
-        return $ restartOrDelay srv tm (waiting ++ r) loop)
-    (waitForSTM (waiting ++ [mgd]) r loop)
-
-restartOrDelay :: IrcServer
-               -> TMVar ()
-               -> [ManagedServer]
-               -> (IrcServer -> IO ())
-               -> IO [ManagedServer]
-restartOrDelay srv tm r loop =
-  if count < times then
-    return (ManagedServer (newSrv,tm) : r)
-   else do
-    now <- getCurrentTime
-    case l of
-         Nothing -> restartSrv now
-         Just t
-           | addUTCTime wait t <= now -> restartSrv now
-           | otherwise                -> delaySrv (addUTCTime wait t)
+run :: Managed a -> IO a
+run m = evalMState (startLoggingM >> m) defState
   where
-    rec@(Reconnect times count wait l) = reconnects srv
-    newRec = rec { recCount = count + 1 }
-    newSrv = srv { reconnects = newRec }
+    defState :: ManagedState
+    defState = ManagedState Nothing
 
-    restartSrv now = do
-      forkIO $ do
-        -- wait five seconds
-        threadDelay (1000000 * 5)
-        loop srv `E.finally` atomically (putTMVar tm ())
-      let rec' = rec { recLastTry = Just now, recCount = 0 }
-          srv' = srv { reconnects = rec' }
-      return (ManagedServer (srv', tm):r)
+runHirc :: HircSettings -> Hirc a -> IO (Either HircError a)
+runHirc s r = runErrorT (runReaderT (evalMState r defState) s)
+  where
+    defState :: HircState
+    defState = HircState Nothing Nothing
 
-    delaySrv t = do
-      forkIO $
-        delayUntil t >> atomically (putTMVar tm ())
-      let rec' = rec { recLastTry = Nothing, recCount = 0 }
-          srv' = srv { reconnects = rec' }
-      return (ManagedServer (srv', tm):r)
+runHircWithSettings :: HircSettings -> Hirc () -> Managed ()
+runHircWithSettings settings hirc = do
+  merr <- liftIO $ runHirc settings hirc
+  case merr of
+       Left err -> handleHircError err settings hirc
+       Right _  -> return ()
+
+-- | Start a new connection and prepare it to be managed by `manageConnections`
+manage :: IrcServer
+       -> Hirc ()
+       -> Managed ()
+manage srv hirc = do
+  cmd <- liftIO newChan
+  msg <- liftIO newChan
+  err <- liftIO newEmptyMVar
+  let settings = HircSettings
+        { server  = srv
+        , cmdChan = cmd
+        , msgChan = msg
+        , errMVar = err
+        , runH    = hirc
+        }
+  forkM $
+    runHircWithSettings settings (startLoggingH >> hirc)
+  return ()
+
+--
+-- Error handling
+--
+
+handleHircError :: HircError
+                -> HircSettings
+                -> Hirc ()
+                -> Managed ()
+
+handleHircError H_ConnectionLost s hirc = do
+  let srv = server s
+      rec@(Reconnect t c w l) = reconnects srv
+  now <- liftIO getCurrentTime
+  if c < t then do
+    let newRec = rec { recCount = c + 1, recLastTry = Just now }
+    forkM $
+      runHircWithSettings (updateRec s newRec) hirc
+    return ()
+   else
+    case l of
+         Nothing -> do
+           logM $ "handleHircError (H_ConnectionLost), \
+                  \the impossible happened: c >= t but no recLastTry"
+           let newRec = rec { recLastTry = Just now }
+           handleHircError H_ConnectionLost (updateRec s newRec) hirc
+         Just time
+           | addUTCTime w time <= now -> do
+             let newRec = rec { recCount = 0, recLastTry = Just now }
+             forkM $
+               runHircWithSettings (updateRec s newRec) hirc
+             return  ()
+           | otherwise -> do
+             forkM $ do
+               delayUntil time
+               let newRec = rec { recCount = 0, recLastTry = Just time }
+               runHircWithSettings (updateRec s newRec) hirc
+             return ()
+
+  where
+    updateRec :: HircSettings -> Reconnect -> HircSettings
+    updateRec settings newRec =
+      let srv    = server settings
+          newSrv = srv { reconnects = newRec }
+       in settings { server = newSrv }
+
+handleHircError e _ _ = do
+  logM $ "Unknown error caught: " ++ show e

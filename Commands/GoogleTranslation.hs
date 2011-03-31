@@ -57,7 +57,7 @@ getGoogleTranslation source target text = do
   case (code, parse json (BS.pack rsp)) of
        (CurlOK, Done _ j) ->
          case fromJSON j of
-              Error s ->
+              Error _ ->
                 return Nothing
               Success (GoogleResult []) ->
                 return . Just . Left  $

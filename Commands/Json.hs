@@ -1,5 +1,7 @@
 {-# LANGUAGE ViewPatterns #-}
 
+-- TODO: Switch to Aeson!
+
 module Commands.Json
     (
       readCommands

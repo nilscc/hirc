@@ -1,3 +1,5 @@
+{-# OPTIONS -fno-warn-unused-do-bind -fno-warn-orphans #-}
+
 module Commands
     (
     -- * command parsing
@@ -6,29 +8,17 @@ module Commands
     ) where
 
 import Control.Applicative
-import Control.Arrow
-import Control.Concurrent
 import Control.Monad
-import Data.Maybe (isNothing)
-import Data.Time
-import Data.Char
 import Data.List (intercalate)
-import System.Locale
-import System.Directory
-import System.IO
-import Numeric
-
-import qualified Data.Map as M
 
 import Text.ParserCombinators.Parsec hiding (many, optional, (<|>), string, spaces)
 import qualified Text.ParserCombinators.Parsec as P
 
-import Commands.Notes
+-- import Commands.Notes
 import Commands.Json
 import Commands.UrlTitle
 import Commands.GoogleTranslation
 -- import Commands.GoogleSearch
-import Utils
 
 type SendTo = Maybe String
 
@@ -62,8 +52,8 @@ parseCommand :: String          -- ^ command prefix
              -> String          -- ^ from
              -> String          -- ^ text to parse
              -> [Reply]
-parseCommand prefix from text = either (const []) id $
-    parse (commands prefix from) "parseCommand" text
+parseCommand prefix from t = either (const []) id $
+    parse (commands prefix from) "parseCommand" t
 
 --
 -- Look for prefix, then parse commands
@@ -76,18 +66,20 @@ commands prefix from = (try (string prefix) *> commandsWithPrefix from []) <|> c
 --
 string :: String -> Parser String
 string = try . P.string
-string' = P.string
+
+-- string' :: String -> Parser String
+-- string' = P.string
 
 spaces :: Parser ()
 spaces = skipMany1 space
 
 text :: [String] -> String -> Reply
 text [] t = TextReply Nothing t
-text to t = TextReply Nothing (concatWith ", " to ++ ": " ++ t)
+text to t = TextReply Nothing (intercalate ", " to ++ ": " ++ t)
 
 io :: [String] -> IO (Maybe String) -> Reply
 io [] f = IOReply Nothing f
-io to f = IOReply Nothing (maybe Nothing (Just . (concatWith ", " to ++).(": " ++)) <$> f)
+io to f = IOReply Nothing (maybe Nothing (Just . (intercalate ", " to ++).(": " ++)) <$> f)
 
 -- }}}
 
@@ -97,7 +89,7 @@ cutAt n s | length s > n = take n s ++ "..."
           | otherwise    = s
 
 commandsWithPrefix :: String -> [String] -> Parser [Reply]
-commandsWithPrefix from to = msum
+commandsWithPrefix _from to = msum
 
     [ do
         string "help"
@@ -223,7 +215,7 @@ commandsWithPrefix from to = msum
     ]
 
 commandsWithoutPrefix :: String -> [String] -> Parser [Reply]
-commandsWithoutPrefix from to = choice
+commandsWithoutPrefix _from _to = choice
 
     [ do
         anyChar `manyTill` choice [ string "http://"
