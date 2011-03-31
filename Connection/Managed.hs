@@ -1,11 +1,10 @@
 {-# OPTIONS -fno-warn-unused-do-bind #-}
 
 module Connection.Managed
-  ( Reconnect (..)
-  , stdReconnect
+  (
 
     -- * Running managed connections
-  , run
+    run
   , manage
   ) where
 
@@ -18,10 +17,6 @@ import Data.Time
 import Hirc
 import Logging
 import Utils
-
--- | Standard reconnect settings with 6 hours delay between retries
-stdReconnect :: Int -> Reconnect
-stdReconnect t = Reconnect t 0 (60 * 60 * 6) Nothing
 
 --
 -- Run MStates

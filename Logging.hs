@@ -2,6 +2,7 @@
 module Logging where
 
 import Control.Concurrent.Chan
+import Control.Monad
 import Control.Monad.Trans
 import Data.Time
 
@@ -31,7 +32,7 @@ startLoggingH = do
     "New logging session  --  " ++ show now ++ "\n\n"
 
   logChan <- liftIO newChan
-  _ <- forkM . liftIO $ do
+  _ <- forkM . forever . liftIO $ do
     s <- readChan logChan
     appendFile logFile s
 
@@ -63,7 +64,7 @@ startLoggingM = do
     "New logging session  --  " ++ show now ++ "\n\n"
 
   logChan <- liftIO newChan
-  _ <- forkM . liftIO $ do
+  _ <- forkM . forever . liftIO $ do
     s <- readChan logChan
     appendFile logFile s
 

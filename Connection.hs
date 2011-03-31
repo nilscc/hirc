@@ -2,20 +2,23 @@
 
 module Connection
     (
-    -- * start connection
+      -- * Connection
       connect
     , sendCmd
     , sendMsg
     , getMsg
 
-    -- * Data types
+      -- * Settings
+    , stdReconnect
+
+      -- * Data types
     , ConnectionCommand (..)
     , module Connection.Managed
     , module Network.IRC
     ) where
 
 
-import Prelude hiding (log)
+import Prelude hiding (catch, log)
 
 import Control.Applicative
 import Control.Monad
@@ -30,6 +33,10 @@ import Connection.Managed
 import Logging
 import Hirc
 
+-- | Standard reconnect settings with 1 hours delay between retries
+stdReconnect :: Int -> Reconnect
+stdReconnect t = Reconnect t 0 (60 * 60 * 1) Nothing
+
 -- | Connect to a IRC server, returns two functions. The first one will return
 -- incoming messages, the second will handle commands
 connect :: UserName     -- ^ nick
@@ -39,7 +46,9 @@ connect :: UserName     -- ^ nick
 connect nick' user' realname = do
 
   srv <- asks server
-  h <- liftIO $ connectTo (host srv) (PortNumber (port srv))
+  h <- liftIO $
+    connectTo (host srv) (PortNumber (port srv)) `catch` \(_ :: IOException) -> do
+    error $ "Connection to \"" ++ host srv ++ ":" ++ show (port srv) ++ "\" failed."
   liftIO $ do
     hSetBuffering h LineBuffering
     hSetBinaryMode h False

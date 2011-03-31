@@ -57,6 +57,7 @@ type Hirc a = MState HircState (ReaderT HircSettings (ErrorT HircError IO)) a
 data HircError
   = H_NotConnected
   | H_ConnectionLost
+  | H_ConnectionFailed
   | H_Other String
   deriving Show
 
