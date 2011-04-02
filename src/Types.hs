@@ -112,3 +112,18 @@ data LogSettings = LogSettings
   , logPrintLevel :: Int
   , logFile       :: FilePath
   }
+
+
+--------------------------------------------------------------------------------
+-- Message filters
+
+type WithMessage = ReaderT Message Hirc
+
+class MonadPeelIO m => Filtered m where
+  runFiltered :: m () -> WithMessage ()
+
+instance Filtered WithMessage where
+  runFiltered = id
+
+instance Filtered Hirc where
+  runFiltered = lift
