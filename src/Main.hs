@@ -1,5 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# OPTIONS -fno-warn-unused-do-bind #-}
+{-# OPTIONS -fno-warn-unused-do-bind
+            -fno-warn-incomplete-patterns
+            #-}
 
 module Main where
 
@@ -16,6 +18,7 @@ import Connection
 import Commands
 import Hirc
 import Logging
+import Messages
 
 --
 -- IRC settings
@@ -54,56 +57,54 @@ myHirc = do
   -- setup channels
   mapM_ (sendCmd . Join) (channels srv)
 
-  onError (sendCmd $ Quit Nothing) . forever $ do
+  onError (sendCmd $ Quit Nothing) . forever . handleIncomingMessage $ do
 
-    msg <- getMsg
-    case msg of
-         Message { msg_command = "PING" } -> do
+    onCommand "PING" $ do
+      logM 4 "PING? PONG!"
+      sendCmd Pong
 
-           logM 4 "PING? PONG!"
-           sendCmd Pong
+    onCommand "INVITE" $ withParams $ \[_,chan] -> do
+      logM 1 $ "Joining: \"" ++ chan ++ "\""
+      sendCmd $ Join chan
 
-         Message { msg_command = "INVITE", msg_params = [_,chan] } -> do
+    onCommand "PRIVMSG" $ withNickname $ \nick' -> withParams $ \[chan', text] -> do
 
-           logM 1 $ "Joining: \"" ++ chan ++ "\""
-           sendCmd $ Join chan
+      if (isCTCP text) then
+        forkM_ $ handleCTCP nick' text
+       else do
+        -- handle private messages correctly
+        let (pref,chan) | chan' == nickName = ("", nick')
+                        | otherwise         = (nickName ++ ": ", chan')
 
-         Message { msg_command = "PRIVMSG", msg_prefix = Just (NickName nick' _ _), msg_params = [chan', text] }
-           | isCTCP text ->
-             handleCTCP nick' text
-           | otherwise   -> do
+        forkM_ . onError (return ()) $
 
-             -- handle private messages correctly
-             let (pref,chan) | chan' == nickName = ("", nick')
-                             | otherwise         = (nickName ++ ": ", chan')
+            let run' rpl = case rpl of
 
-             forkM . onError (return ()) $
+                  SafeReply rpl' -> run' $ rpl'
 
-                 let run' rpl = case rpl of
+                  TextReply to str -> do
+                    logM 2 $ "Sending text reply: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
+                    mapM_ (sendCmd . PrivMsg (fromMaybe chan to)) (lines str)
 
-                                     SafeReply rpl' -> run' $ rpl'
-
-                                     TextReply to str -> do
-                                       logM 2 $ "Sending text reply: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
-                                       mapM_ (sendCmd . PrivMsg (fromMaybe chan to)) (lines str)
-
-                                     IOReply to io -> do
-                                       logM 2 "Running IO command..."
-                                       s <- liftIO $ io `catch` \(_::SomeException) -> return Nothing
-                                       case s of
-                                            Just str -> do logM 2 $
-                                                             "IO command successful, sending: "
-                                                             ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
-                                                           sendCmd $ PrivMsg (fromMaybe chan to) str
-                                            Nothing  -> logM 2 $ "Fail: No Function result (\"" ++ text ++ "\")"
+                  IOReply to io -> do
+                    logM 2 "Running IO command..."
+                    s <- liftIO io `catch` \(e::SomeException) -> do
+                      logM 2 $ "Exception in IO command: " ++ show e
+                      return Nothing
+                    case s of
+                         Just str -> do
+                           logM 2 $ "IO command successful, sending: "
+                                 ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
+                           sendCmd $ PrivMsg (fromMaybe chan to) str
+                         Nothing ->
+                           logM 2 $ "Fail: No Function result (\"" ++ text ++ "\")"
 
 
-                  -- wait 1 second between each event
-                  in mapM_ (\r -> run' r) $ parseCommand pref nick' text 
+             -- wait 1 second between each event
+             in mapM_ (\r -> run' r) $ parseCommand pref nick' text 
 
-             return ()
-
-         _ -> return ()
+--------------------------------------------------------------------------------
+-- CTCP
 
 isCTCP :: String -> Bool
 isCTCP s = not (null s)
@@ -111,8 +112,11 @@ isCTCP s = not (null s)
         && last s == '\001'
 
 handleCTCP :: To -> String -> Hirc ()
+
 handleCTCP to "\001VERSION\001" = do
+  logM 2 "Sending CTCP VERSION reply"
   sendCmd $ Notice to "\001VERSION hirc v0.2\001"
+
 handleCTCP _ t =
   logM 2 $ "Unhandled CTCP: " ++ t
 
