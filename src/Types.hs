@@ -5,6 +5,7 @@ module Types where
 import Control.Concurrent.Chan
 import Control.Concurrent.MVar
 import Control.Concurrent.MState
+import Control.Monad.IO.Peel
 import Control.Monad.Reader
 import Control.Monad.Error
 import Data.Time
@@ -12,6 +13,8 @@ import Network
 import Network.IRC
 import System.IO
 
+
+--------------------------------------------------------------------------------
 -- Connections
 
 data IrcServer = IrcServer
@@ -45,6 +48,8 @@ data ConnectionCommand
   | Quit (Maybe String)
   deriving Show
 
+
+--------------------------------------------------------------------------------
 -- The Managed monad
 
 type Managed = MState ManagedState (ReaderT ManagedSettings IO)
@@ -56,6 +61,8 @@ data ManagedSettings = ManagedSettings
   , logSettingsM  :: LogSettings
   }
 
+
+--------------------------------------------------------------------------------
 -- The Hirc monad
 
 type Hirc = MState HircState (ReaderT HircSettings (ErrorT HircError IO))
@@ -84,9 +91,11 @@ data HircState = HircState
   { connectedHandle :: Maybe Handle
   }
 
+
+--------------------------------------------------------------------------------
 -- Logging
 
-class MonadIO m => LogM m where
+class MonadPeelIO m => LogM m where
   logChan     :: m (Chan (Int,String))
   logSettings :: m LogSettings
 

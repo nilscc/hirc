@@ -29,13 +29,13 @@ run m = do
           { logChanM     = c
           , logSettingsM = debugManagedSettings
           }
-    runReaderT (evalMState (startLogging >> m) defState) settings
+    runReaderT (evalMState True (startLogging >> m) defState) settings
   where
     defState :: ManagedState
     defState = ManagedState
 
 runHirc :: HircSettings -> Hirc a -> IO (Either HircError a)
-runHirc s r = runErrorT (runReaderT (evalMState r defState) s)
+runHirc s r = runErrorT (runReaderT (evalMState True r defState) s)
   where
     defState :: HircState
     defState = HircState Nothing

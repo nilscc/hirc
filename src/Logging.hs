@@ -11,6 +11,7 @@ module Logging
 import Control.Concurrent.Chan
 import Control.Concurrent.MState
 import Control.Monad
+import Control.Monad.IO.Peel
 import Control.Monad.Trans
 import Data.Time
 import System.Directory
@@ -62,7 +63,8 @@ logLoop = do
       liftIO $ putStrLn s
 
 -- | Start the log loop in a `MState` thread
-startLogging :: (LogM (MState t m), Forkable m) => MState t m ()
+startLogging :: (LogM (MState t m), Forkable m, MonadPeelIO m)
+  => MState t m ()
 startLogging = do
   liftIO $ do
     e <- doesDirectoryExist "logs"

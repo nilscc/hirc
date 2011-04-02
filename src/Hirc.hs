@@ -24,17 +24,13 @@ module Hirc
   , LogSettings (..)
 
     -- * Reexports
-    -- ** MState functions
-  , get, gets, put, modifyM, forkM, killMState
-    -- ** Reader functions
-  , ask, asks, local
+  , module Control.Concurrent.MState
+  , module Control.Monad.Reader
+  , module Control.Exception.Peel
   ) where
 
 import Control.Concurrent.MState
 import Control.Monad.Reader
-import Control.Monad.State.Class
+import Control.Exception.Peel
 
 import Types
-
-{-
--}

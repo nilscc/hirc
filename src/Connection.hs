@@ -24,7 +24,6 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Error
 import Control.Concurrent
-import Control.Exception.Peel
 import Network
 import Network.IRC
 import System.IO
@@ -52,7 +51,7 @@ connect nick' user' realname = do
   liftIO $ do
     hSetBuffering h LineBuffering
     hSetBinaryMode h False
-  modifyM $ \s -> s { connectedHandle = Just h }
+  modifyM_ $ \s -> s { connectedHandle = Just h }
 
   _ <- forkM listenForMessages
   _ <- forkM receiveCommand
@@ -110,7 +109,7 @@ receiveCommand = forever . requireHandle $ \h -> do
          -- shutdown everything
          sendMsg $ quit msg
          liftIO $ hClose h
-         modifyM $ \s -> s { connectedHandle = Nothing }
+         modifyM_ $ \s -> s { connectedHandle = Nothing }
          -- error will (hopefully) get cought
          throwError H_ConnectionLost
 
