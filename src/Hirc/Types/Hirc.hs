@@ -24,7 +24,7 @@ data HircError
   | H_ConnectionLost
   | H_ConnectionFailed
   | H_Other String
-  deriving Show
+  deriving (Show, Eq)
 
 instance Error HircError where
   strMsg = H_Other

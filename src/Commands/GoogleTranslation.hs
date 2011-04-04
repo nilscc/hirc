@@ -1,14 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Commands.GoogleTranslation
-    (
-      getGoogleTranslation
+    ( getGoogleTranslation
     ) where
 
 import Prelude hiding (concat, lines)
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.Trans
 import Data.Aeson
 import Data.Attoparsec
 import Data.Maybe
@@ -49,8 +49,12 @@ apiUrl source target q = exportURL $
 
 -- IO
 
-getGoogleTranslation :: Language -> Language -> String -> IO (Maybe (Either String String))
-getGoogleTranslation source target text = do
+getGoogleTranslation :: MonadIO m
+                     => Language
+                     -> Language
+                     -> String
+                     -> m (Maybe (Either String String))
+getGoogleTranslation source target text = liftIO $ do
   let source' = fromMaybe source $ languageByName source
       target' = fromMaybe target $ languageByName target
   (code, rsp) <- curlGetString (apiUrl source' target' text) []

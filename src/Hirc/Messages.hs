@@ -6,6 +6,7 @@
 module Hirc.Messages where
 
 import Prelude hiding (catch)
+import Control.Monad.Error
 import Control.Monad.Reader
 import Control.Exception.Peel
 import qualified Network.IRC as IRC
@@ -17,7 +18,16 @@ import Hirc.Types
 handleIncomingMessage :: WithMessage () -> Hirc ()
 handleIncomingMessage m = do
   msg <- getMsg
-  runReaderT m msg
+  runReaderT (m `catchError` noMsgErr) msg
+ where
+  noMsgErr e | e == noMsg = return ()
+             | otherwise  = throwError e
+
+done :: WithMessage ()
+done = mzero
+
+doneAfter :: Filtered m => m () -> WithMessage ()
+doneAfter m = runFiltered m >> done
 
 
 --------------------------------------------------------------------------------
@@ -59,7 +69,6 @@ withNickAndUser m =
   withNickname $ \n ->
   withUsername $ \u ->
     m n u
-
 
 withServer :: Filtered m
            => (String -> m ())

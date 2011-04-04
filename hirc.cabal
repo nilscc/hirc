@@ -37,7 +37,8 @@ executable hirc
         stm == 2.*,
         mstate == 0.2.*,
         monad-peel == 0.1.*,
-        tagsoup == 0.*
+        tagsoup == 0.*,
+        regex-posix == 0.*
 
 
 source-repository head

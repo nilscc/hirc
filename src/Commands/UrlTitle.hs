@@ -7,14 +7,15 @@ module Commands.UrlTitle
 
 import Control.Arrow
 import Control.Monad
+import Control.Monad.Trans
 import Data.Char
 import Text.HTML.TagSoup
 
 import Network.Curl
 
 -- | Combination of performCurl and getTitle
-getTitle :: URLString -> IO (Maybe String)
-getTitle url = do
+getTitle :: MonadIO m => URLString -> m (Maybe String)
+getTitle url = liftIO $ do
   (code, s) <- curlGetString url [CurlFollowLocation True]
   return $
     case code of

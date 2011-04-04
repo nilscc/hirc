@@ -1,15 +1,17 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables, ViewPatterns #-}
 {-# OPTIONS -fno-warn-unused-do-bind
             -fno-warn-incomplete-patterns
             #-}
 
 module Main where
 
-import Prelude                  hiding (catch)
-import Data.Maybe
+import Prelude                      hiding (catch)
+import Text.Regex.Posix
 
-import Commands
-import Hirc                     hiding (join)
+import Commands.GoogleTranslation
+import Commands.UrlTitle
+import Hirc                         hiding (join)
+import Hirc.Types (Filtered, runFiltered)
 
 --
 -- IRC settings
@@ -51,54 +53,76 @@ myHirc = do
   -- setup channels
   mapM_ join (channels srv)
 
-  handle (\(_::SomeException) -> sendCmd $ Quit Nothing) . forever . handleIncomingMessage $ do
+  let logException (e :: SomeException) = do
+        logM 1 $ "Some exception: " ++ show e
+        sendCmd $ Quit Nothing
+  handle logException . forever . handleIncomingMessage $ do
+
+    myNick <- lift getNickname
+    myUser <- lift getUsername
 
     onCommand "PING" $
       pong
 
-    onCommand "NICK" $ withNickAndUser $ \n u -> do
-      n' <- getNickname
-      u' <- getUsername
-      when (n == n' && u == u') (setNickname n)
+    onCommand "NICK" $
+      withNickAndUser $ \n u ->
+      withParams      $ \[new] ->
+      doneAfter       $
+      when (n == myNick && u == myUser)
+           (setNickname new)
 
     onCommand "INVITE" $ withParams $ \[_,chan] ->
       join chan
 
-    onCommand "PRIVMSG" $ withNickname $ \nick' -> withParams $ \[chan', text] -> do
+    onCommand "PRIVMSG" $ do
+      
+      withParams $ \[_,text] ->
+        when (isCTCP text) $ do
+          handleCTCP text
+          done
 
-      if (isCTCP text) then
-        handleCTCP nick' text
-       else do
-        n <- getNickname
-        let -- handle private messages correctly
-            (pref,chan) | chan' == n = ("", nick')
-                        | otherwise  = (n ++ ": ", chan')
-        mapM_ (runReply chan text) $
-          parseCommand pref nick' text 
+      onValidPrefix myNick $
+        handleUserCommands
+
+      showUrlTitles
 
 --------------------------------------------------------------------------------
--- Replies
+-- User commands
 
-runReply :: String -> String -> Reply -> Hirc ()
+handleUserCommands :: WithMessage ()
+handleUserCommands = do
 
-runReply chan text (SafeReply rpl) = runReply chan text rpl
+  -- google translation
+  userCommand $ \"translate" lang1 lang2 (unwords -> what) -> do
 
-runReply chan _ (TextReply to str) = do
-  logM 2 $ "Sending text reply: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
-  mapM_ (sendCmd . PrivMsg (fromMaybe chan to)) (lines str)
+    result <- getGoogleTranslation lang1 lang2 what
+    case result of
+         Just (Right translation) -> withNickname $ \n -> do
+           logM 2 $ "Sending translation to " ++ show n
+           answer translation
+         e ->
+           logM 2 $ "Translation failed with: " ++ show e 
+    done
 
-runReply chan text (IOReply to io) = do
-  logM 2 "Running IO command..."
-  s <- liftIO io `catch` \(e::SomeException) -> do
-    logM 2 $ "Exception in IO command: " ++ show e
-    return Nothing
-  case s of
-       Just str -> do
-         logM 2 $ "IO command successful, sending: "
-               ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
-         sendCmd $ PrivMsg (fromMaybe chan to) str
-       Nothing ->
-         logM 2 $ "Fail: No Function result (\"" ++ text ++ "\")"
+  -- no result :(
+  withParams $ \[_,text] ->
+    logM 2 $ "No result for: \"" ++ text ++ "\"" :: Hirc ()
+
+
+--------------------------------------------------------------------------------
+-- URL stuff
+
+showUrlTitles :: WithMessage ()
+showUrlTitles = withParams $ \[_,text] -> do
+  let urls = filter (=~ "^(http://|https://|www\\.)") (words text)
+  case urls of
+       (url:_) -> do
+         title <- getTitle url
+         maybe (return ())
+               (answer' . ("Title: " ++))
+               title
+       _ -> return ()
+
 
 --------------------------------------------------------------------------------
 -- CTCP
@@ -108,25 +132,61 @@ isCTCP s = not (null s)
         && head s == '\001' 
         && last s == '\001'
 
-handleCTCP :: To -> String -> Hirc ()
+handleCTCP :: String -> WithMessage ()
 
-handleCTCP to "\001VERSION\001" = do
-  logM 2 "Sending CTCP VERSION reply"
-  sendCmd $ Notice to "\001VERSION hirc v0.2\001"
+handleCTCP "\001VERSION\001" =
+  withNickname $ \to -> do
+    logM 2 $ "Sending CTCP VERSION reply to \"" ++ to ++ "\""
+    sendCmd $ Notice to "\001VERSION hirc v0.2\001"
 
-handleCTCP _ t =
+handleCTCP t =
   logM 2 $ "Unhandled CTCP: " ++ t
 
---
--- Exception handling
---
 
-{-
--- | Catch exceptions
-onError :: (Show e, Error e, MonadError e m, MonadIO m) => m a -> m a -> m a
-onError f = catchError `flip` (\e -> putSLn ("Exception in Main: " ++ show e) >> f)
+--------------------------------------------------------------------------------
+-- Other
 
--- | Ignore exceptions and return `Nothing` if an exception occurs
-safe :: (Show e, Error e, MonadError e m, MonadIO m) => m a -> m (Maybe a)
-safe io = onError (return Nothing) (io >>= return . Just)
--}
+onValidPrefix :: Nickname
+              -> WithMessage ()
+              -> WithMessage ()
+onValidPrefix myNick wm =
+  withParams $ \[c,_] ->
+  if c == myNick then
+    -- direct query
+    wm
+   else
+    -- public channel with valid prefix
+    userCommand $ \(validPrefix myNick -> True) ->
+      wm
+ where
+  validPrefix :: Nickname -> String -> Bool
+  validPrefix n s = s =~ ("^" ++ n ++ "[:,.-\\!]$")
+
+answerTo :: Filtered m
+         => (Either String String -> m ())
+         -> WithMessage ()
+answerTo m = withParams $ \[c,_] -> do
+  n <- lift getNickname
+  if c == n then
+    -- private message to user
+    withNickname $ m . Left
+   else
+    -- public message to channel
+    runFiltered $ m (Right c)
+
+-- | Answer and add the nick for public channels
+answer :: String
+       -> WithMessage ()
+answer text =
+  answerTo $
+    either (\n -> lift $
+             sendCmd $ PrivMsg n text)
+           (\c -> withNickname $ \n ->
+             sendCmd $ PrivMsg c (n ++ ": " ++ text))
+
+-- | Answer without prefix the nick in a public channel
+answer' :: String
+        -> WithMessage ()
+answer' text =
+  answerTo $ \to ->
+    sendCmd $ PrivMsg (either id id to) text

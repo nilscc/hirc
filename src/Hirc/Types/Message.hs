@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# OPTIONS -fno-warn-orphans #-}
 
 module Hirc.Types.Message where
 
@@ -22,3 +23,7 @@ instance Filtered WithMessage where
 
 instance Filtered Hirc where
   runFiltered = lift
+
+instance LogM WithMessage where
+  logChan     = lift logChan
+  logSettings = lift logSettings

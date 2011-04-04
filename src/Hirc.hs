@@ -13,6 +13,11 @@ module Hirc
   , getRealname
   , setNickname
 
+    -- ** Messages and user commands
+  , WithMessage
+  , module Hirc.Messages
+  , module Hirc.Commands
+
     -- ** Managed types
   , Managed
   , ManagedState (..)
@@ -26,17 +31,14 @@ module Hirc
   , Username
   , Realname
   , To
+  , module Hirc.Connection
 
     -- ** Logging
   , LogM (..)
   , LogSettings (..)
-
-    -- * Reexports
-  , module Hirc.Commands
-  , module Hirc.Connection
-  , module Hirc.Messages
   , module Hirc.Logging
 
+    -- * Reexports
   , module Control.Concurrent.MState
   , module Control.Monad.Reader
   , module Control.Exception.Peel
