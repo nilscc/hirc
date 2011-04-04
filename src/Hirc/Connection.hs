@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Connection
+module Hirc.Connection
     (
       -- * Connection
       connect
@@ -12,8 +12,7 @@ module Connection
     , stdReconnect
 
       -- * Data types
-    , ConnectionCommand (..)
-    , module Connection.Managed
+    , module Hirc.Connection.Managed
     , module Network.IRC
     ) where
 
@@ -21,16 +20,19 @@ module Connection
 import Prelude hiding (catch)
 
 import Control.Applicative
-import Control.Monad
-import Control.Monad.Error
 import Control.Concurrent
+import Control.Concurrent.MState
+import Control.Exception.Peel
+import Control.Monad
+import Control.Monad.Reader
+import Control.Monad.Error
 import Network
 import Network.IRC
 import System.IO
 
-import Connection.Managed
-import Logging
-import Hirc
+import Hirc.Types
+import Hirc.Connection.Managed
+import Hirc.Logging
 
 -- | Standard reconnect settings with 1 hours delay between retries
 stdReconnect :: Int -> Reconnect

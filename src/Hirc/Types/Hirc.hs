@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 
-module Types where
+module Hirc.Types.Hirc where
 
 import Control.Concurrent.Chan
 import Control.Concurrent.MVar
@@ -8,58 +8,10 @@ import Control.Concurrent.MState
 import Control.Monad.IO.Peel
 import Control.Monad.Reader
 import Control.Monad.Error
-import Data.Time
-import Network
 import Network.IRC
 import System.IO
 
-
---------------------------------------------------------------------------------
--- Connections
-
-data IrcServer = IrcServer
-  { host        :: String
-  , port        :: PortNumber
-  , reconnects  :: Reconnect
-  , channels    :: [String]
-  }
-
-data Reconnect = Reconnect
-  { recTimes    :: Int
-  , recCount    :: Int
-  , recWait     :: NominalDiffTime
-  , recLastTry  :: Maybe UTCTime
-  }
-
-type Nickname = String
-type Username = String
-type Realname = String
-
-type To = Nickname
-
-data ConnectionCommand
-  = Send Message
-  | PrivMsg To String  -- ^ private message
-  | Notice To String
-  | Join Channel
-  | Part Channel
-  | Ping
-  | Pong
-  | Quit (Maybe String)
-  deriving Show
-
-
---------------------------------------------------------------------------------
--- The Managed monad
-
-type Managed = MState ManagedState (ReaderT ManagedSettings IO)
-
-data ManagedState = ManagedState
-
-data ManagedSettings = ManagedSettings
-  { logChanM      :: Chan (Int,String)
-  , logSettingsM  :: LogSettings
-  }
+import Hirc.Types.Connection
 
 
 --------------------------------------------------------------------------------
@@ -89,6 +41,22 @@ data HircSettings = HircSettings
 
 data HircState = HircState
   { connectedHandle :: Maybe Handle
+  , ircNickname     :: String
+  , ircUsername     :: String
+  , ircRealname     :: String
+  }
+
+
+--------------------------------------------------------------------------------
+-- The Managed monad
+
+type Managed = MState ManagedState (ReaderT ManagedSettings IO)
+
+data ManagedState = ManagedState
+
+data ManagedSettings = ManagedSettings
+  { logChanM      :: Chan (Int,String)
+  , logSettingsM  :: LogSettings
   }
 
 
@@ -112,18 +80,3 @@ data LogSettings = LogSettings
   , logPrintLevel :: Int
   , logFile       :: FilePath
   }
-
-
---------------------------------------------------------------------------------
--- Message filters
-
-type WithMessage = ReaderT Message Hirc
-
-class MonadPeelIO m => Filtered m where
-  runFiltered :: m () -> WithMessage ()
-
-instance Filtered WithMessage where
-  runFiltered = id
-
-instance Filtered Hirc where
-  runFiltered = lift

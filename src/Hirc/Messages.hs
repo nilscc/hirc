@@ -3,15 +3,15 @@
 
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 
-module Messages where
+module Hirc.Messages where
 
 import Prelude hiding (catch)
 import Control.Monad.Reader
+import Control.Exception.Peel
 import qualified Network.IRC as IRC
 
-import Hirc
-import Connection
-import Types
+import Hirc.Connection
+import Hirc.Types
 
 
 handleIncomingMessage :: WithMessage () -> Hirc ()

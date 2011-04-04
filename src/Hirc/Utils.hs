@@ -1,4 +1,4 @@
-module Utils
+module Hirc.Utils
     ( delayUntil
     ) where
 

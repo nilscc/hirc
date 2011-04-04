@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-module Logging
+module Hirc.Logging
   ( logM
   , startLogging
     -- * Log settings
@@ -16,7 +16,7 @@ import Control.Monad.Trans
 import Data.Time
 import System.Directory
 
-import Hirc
+import Hirc.Types
 
 --
 -- Settings

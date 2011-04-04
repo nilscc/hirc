@@ -1,6 +1,6 @@
 {-# OPTIONS -fno-warn-unused-do-bind #-}
 
-module Connection.Managed
+module Hirc.Connection.Managed
   (
 
     -- * Running managed connections
@@ -14,8 +14,8 @@ import Control.Monad.Error
 import Control.Monad.Reader
 -- import Data.Time
 
-import Hirc
-import Logging
+import Hirc.Types
+import Hirc.Logging
 -- import Utils
 
 --

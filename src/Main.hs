@@ -6,18 +6,10 @@
 module Main where
 
 import Prelude                  hiding (catch)
+import Data.Maybe
 
-import Control.Monad            hiding (join)
-import Control.Monad.Trans
-import Control.Exception.Peel
-import Data.Maybe (fromMaybe)
-import Data.Time
-
-import Connection
 import Commands
 import Hirc                     hiding (join)
-import Logging
-import Messages
 
 --
 -- IRC settings
@@ -138,16 +130,3 @@ onError f = catchError `flip` (\e -> putSLn ("Exception in Main: " ++ show e) >>
 safe :: (Show e, Error e, MonadError e m, MonadIO m) => m a -> m (Maybe a)
 safe io = onError (return Nothing) (io >>= return . Just)
 -}
-
-
---
--- Other
---
-
-putS :: MonadIO m => String -> m ()
-putS s = do
-  now <- liftIO getCurrentTime
-  liftIO $ putStr $ "(" ++ show now ++ ") " ++ s
-
-putSLn :: MonadIO m => String -> m ()
-putSLn s = putS $ s ++ "\n"
