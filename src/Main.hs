@@ -58,18 +58,18 @@ myHirc = do
         sendCmd $ Quit Nothing
   handle logException . forever . handleIncomingMessage $ do
 
-    myNick <- lift getNickname
-    myUser <- lift getUsername
-
     onCommand "PING" $
       pong
 
     onCommand "NICK" $
       withNickAndUser $ \n u ->
       withParams      $ \[new] ->
-      doneAfter       $
-      when (n == myNick && u == myUser)
-           (setNickname new)
+      doneAfter       $ do
+        myNick <- getNickname
+        myUser <- getUsername
+        when (n == myNick && u == myUser) $ do
+             setNickname new
+             logM 1 $ "Nick changed to \"" ++ new ++ "\""
 
     onCommand "INVITE" $ withParams $ \[_,chan] ->
       join chan
@@ -81,8 +81,7 @@ myHirc = do
           handleCTCP text
           done
 
-      onValidPrefix myNick $
-        handleUserCommands
+      onValidPrefix handleUserCommands
 
       showUrlTitles
 
@@ -146,21 +145,29 @@ handleCTCP t =
 --------------------------------------------------------------------------------
 -- Other
 
-onValidPrefix :: Nickname
+onValidPrefix :: WithMessage ()
               -> WithMessage ()
-              -> WithMessage ()
-onValidPrefix myNick wm =
-  withParams $ \[c,_] ->
-  if c == myNick then
-    -- direct query
-    wm
-   else
-    -- public channel with valid prefix
-    userCommand $ \(validPrefix myNick -> True) ->
+onValidPrefix wm =
+  withParams $ \[c,_] -> do
+    myNick <- lift getNickname
+    if c == myNick then
+      -- direct query
       wm
+     else
+      -- public channel with valid prefix
+      userCommand $ \(validPrefix myNick -> True) ->
+        wm
  where
   validPrefix :: Nickname -> String -> Bool
-  validPrefix n s = s =~ ("^" ++ n ++ "[:,.-\\!]$")
+  validPrefix n s = s =~ ("^" ++ escape n ++ "[:,.-\\!]?$")
+
+  escape n = foldr esc "" n
+  esc '\\' r = "\\\\" ++ r
+  esc '['  r = "\\[" ++ r
+  esc ']'  r = "\\]" ++ r
+  esc '{'  r = "\\{" ++ r
+  esc '}'  r = "\\}" ++ r
+  esc a    r = a:r
 
 answerTo :: Filtered m
          => (Either String String -> m ())
