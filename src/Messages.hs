@@ -52,6 +52,15 @@ withUsername m = catchPatternException $ do
   Just (NickName _ (Just u) _) <- asks IRC.msg_prefix
   runFiltered (m u)
 
+withNickAndUser :: Filtered m
+                => (String -> String -> m ())
+                -> WithMessage ()
+withNickAndUser m =
+  withNickname $ \n ->
+  withUsername $ \u ->
+    m n u
+
+
 withServer :: Filtered m
            => (String -> m ())
            -> WithMessage ()

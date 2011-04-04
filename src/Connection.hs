@@ -58,6 +58,11 @@ connect nick' user' realname = do
 
   sendCmd $ Send (nick nick')
   sendCmd $ Send (user user' "*" "*" realname)
+  modifyM_ $ \s -> s
+    { ircNickname = nick'
+    , ircUsername = user'
+    , ircRealname = realname
+    }
 
   waitFor001
 

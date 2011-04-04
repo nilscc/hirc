@@ -2,15 +2,22 @@ module Hirc
   ( -- requireHandle
 
     -- * Types
-    -- ** Hirc types
+    -- ** Hirc types & functions
     Hirc
   , HircError (..)
   , HircState (..)
   , HircSettings (..)
+
+  , getNickname
+  , getUsername
+  , getRealname
+  , setNickname
+
     -- ** Managed types
   , Managed
   , ManagedState (..)
   , ManagedSettings (..)
+
     -- ** Connection types
   , IrcServer (..)
   , Reconnect (..)
@@ -19,6 +26,7 @@ module Hirc
   , Username
   , Realname
   , To
+
     -- ** Logging
   , LogM (..)
   , LogSettings (..)
@@ -34,3 +42,15 @@ import Control.Monad.Reader
 import Control.Exception.Peel
 
 import Types
+
+setNickname :: String -> Hirc ()
+setNickname n = modifyM_ $ \s -> s { ircNickname = n }
+
+getNickname :: Hirc String
+getNickname = gets ircNickname
+
+getUsername :: Hirc String
+getUsername = gets ircUsername
+
+getRealname :: Hirc String
+getRealname = gets ircRealname

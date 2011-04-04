@@ -5,31 +5,23 @@
 
 module Main where
 
-import Prelude hiding (catch)
+import Prelude                  hiding (catch)
 
-import Control.Monad
+import Control.Monad            hiding (join)
 import Control.Monad.Trans
-import Control.Monad.Error
 import Control.Exception.Peel
 import Data.Maybe (fromMaybe)
 import Data.Time
 
 import Connection
 import Commands
-import Hirc
+import Hirc                     hiding (join)
 import Logging
 import Messages
 
 --
 -- IRC settings
 --
-
-nickName :: Nickname
-nickName = "hirc"
-userName :: Username
-userName = "hirc"
-realName :: Realname
-realName = "hirc"
 
 servers :: [IrcServer]
 servers =
@@ -46,62 +38,75 @@ servers =
 main :: IO ()
 main = run $ mapM_ (manage `flip` myHirc) servers
 
+join :: String -> Hirc ()
+join chan = do
+  logM 1 $ "Joining: \"" ++ chan ++ "\""
+  sendCmd $ Join chan
+
+pong :: Hirc ()
+pong = do
+  logM 4 "PING? PONG!"
+  sendCmd Pong
+
 myHirc :: Hirc ()
 myHirc = do
 
-  connect nickName userName realName
+  connect "hirc" "hirc" "hirc"
 
   srv <- asks server
-  putSLn $ "Connected to: " ++ (host srv)
+  logM 1 $ "Connected to: " ++ (host srv)
 
   -- setup channels
-  mapM_ (sendCmd . Join) (channels srv)
+  mapM_ join (channels srv)
 
-  onError (sendCmd $ Quit Nothing) . forever . handleIncomingMessage $ do
+  handle (\(_::SomeException) -> sendCmd $ Quit Nothing) . forever . handleIncomingMessage $ do
 
-    onCommand "PING" $ do
-      logM 4 "PING? PONG!"
-      sendCmd Pong
+    onCommand "PING" $
+      pong
 
-    onCommand "INVITE" $ withParams $ \[_,chan] -> do
-      logM 1 $ "Joining: \"" ++ chan ++ "\""
-      sendCmd $ Join chan
+    onCommand "NICK" $ withNickAndUser $ \n u -> do
+      n' <- getNickname
+      u' <- getUsername
+      when (n == n' && u == u') (setNickname n)
+
+    onCommand "INVITE" $ withParams $ \[_,chan] ->
+      join chan
 
     onCommand "PRIVMSG" $ withNickname $ \nick' -> withParams $ \[chan', text] -> do
 
       if (isCTCP text) then
-        forkM_ $ handleCTCP nick' text
+        handleCTCP nick' text
        else do
-        -- handle private messages correctly
-        let (pref,chan) | chan' == nickName = ("", nick')
-                        | otherwise         = (nickName ++ ": ", chan')
+        n <- getNickname
+        let -- handle private messages correctly
+            (pref,chan) | chan' == n = ("", nick')
+                        | otherwise  = (n ++ ": ", chan')
+        mapM_ (runReply chan text) $
+          parseCommand pref nick' text 
 
-        forkM_ . onError (return ()) $
+--------------------------------------------------------------------------------
+-- Replies
 
-            let run' rpl = case rpl of
+runReply :: String -> String -> Reply -> Hirc ()
 
-                  SafeReply rpl' -> run' $ rpl'
+runReply chan text (SafeReply rpl) = runReply chan text rpl
 
-                  TextReply to str -> do
-                    logM 2 $ "Sending text reply: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
-                    mapM_ (sendCmd . PrivMsg (fromMaybe chan to)) (lines str)
+runReply chan _ (TextReply to str) = do
+  logM 2 $ "Sending text reply: " ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
+  mapM_ (sendCmd . PrivMsg (fromMaybe chan to)) (lines str)
 
-                  IOReply to io -> do
-                    logM 2 "Running IO command..."
-                    s <- liftIO io `catch` \(e::SomeException) -> do
-                      logM 2 $ "Exception in IO command: " ++ show e
-                      return Nothing
-                    case s of
-                         Just str -> do
-                           logM 2 $ "IO command successful, sending: "
-                                 ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
-                           sendCmd $ PrivMsg (fromMaybe chan to) str
-                         Nothing ->
-                           logM 2 $ "Fail: No Function result (\"" ++ text ++ "\")"
-
-
-             -- wait 1 second between each event
-             in mapM_ (\r -> run' r) $ parseCommand pref nick' text 
+runReply chan text (IOReply to io) = do
+  logM 2 "Running IO command..."
+  s <- liftIO io `catch` \(e::SomeException) -> do
+    logM 2 $ "Exception in IO command: " ++ show e
+    return Nothing
+  case s of
+       Just str -> do
+         logM 2 $ "IO command successful, sending: "
+               ++ maybe "" (\c -> "(" ++ c ++ ") ") to ++ str
+         sendCmd $ PrivMsg (fromMaybe chan to) str
+       Nothing ->
+         logM 2 $ "Fail: No Function result (\"" ++ text ++ "\")"
 
 --------------------------------------------------------------------------------
 -- CTCP
@@ -124,6 +129,7 @@ handleCTCP _ t =
 -- Exception handling
 --
 
+{-
 -- | Catch exceptions
 onError :: (Show e, Error e, MonadError e m, MonadIO m) => m a -> m a -> m a
 onError f = catchError `flip` (\e -> putSLn ("Exception in Main: " ++ show e) >> f)
@@ -131,6 +137,7 @@ onError f = catchError `flip` (\e -> putSLn ("Exception in Main: " ++ show e) >>
 -- | Ignore exceptions and return `Nothing` if an exception occurs
 safe :: (Show e, Error e, MonadError e m, MonadIO m) => m a -> m (Maybe a)
 safe io = onError (return Nothing) (io >>= return . Just)
+-}
 
 
 --

@@ -38,7 +38,7 @@ runHirc :: HircSettings -> Hirc a -> IO (Either HircError a)
 runHirc s r = runErrorT (runReaderT (evalMState True r defState) s)
   where
     defState :: HircState
-    defState = HircState Nothing
+    defState = HircState Nothing "" "" ""
 
 runHircWithSettings :: HircSettings -> Hirc () -> Managed ()
 runHircWithSettings settings hirc = do
