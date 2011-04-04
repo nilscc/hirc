@@ -27,9 +27,11 @@ runC wrds cmd = case cmd of
   HC_WithMsg h -> h >>= runC wrds
   HC_Lam f     -> 
     case wrds of
-         (w:ws) -> local dropWord $ runC ws (f w)
+         (w:ws) -> local dropWord $ catchPatternException $
+                     runC ws (f w)
          []     -> return ()
-  HC_Lams f    -> runC [] $ f wrds
+  HC_Lams f    -> catchPatternException $
+                    runC [] $ f wrds
 
 
 --------------------------------------------------------------------------------
