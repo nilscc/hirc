@@ -53,6 +53,7 @@ connect nick' user' realname = do
   liftIO $ do
     hSetBuffering h LineBuffering
     hSetBinaryMode h False
+    hSetEncoding h utf8
   modifyM_ $ \s -> s { connectedHandle = Just h }
 
   _ <- forkM listenForMessages
@@ -131,16 +132,32 @@ listenForMessages :: Hirc ()
 listenForMessages = forever $ do
   l <- safeGetLine
   logM 3 $ "listenForMessage --- " ++ show l
-  case join $ fmap decode l of
+  case decode l of
        Just m  -> do
          msg <- asks msgChan
          liftIO $ writeChan msg m
        Nothing -> return () -- todo
 
-safeGetLine :: Hirc (Maybe String)
+safeGetLine :: Hirc String
 safeGetLine = requireHandle $ \h ->
-  either (\(_::SomeException) -> Nothing) Just <$>
-    liftIO (try $ hGetLine h)
+  catch (liftIO $ hGetLine h) $ \(e :: SomeException) -> do
+    logM 1 $ "safeGetLine, exception: " ++ show e
+    tryEncoding [latin1, utf16, utf32]
+
+tryEncoding :: [TextEncoding] -> Hirc String
+tryEncoding (enc:r) = requireHandle $ \h ->
+  let io = finally (do hSetEncoding h enc
+                       hGetLine h)
+                   (hSetEncoding h utf8)
+      logEnc = logM 1 $ "tryEncoding, successfully used encoding: \"" ++ show enc ++ "\""
+   in catch (liftIO io <* logEnc) $ \(e :: SomeException) -> do
+        logM 1 $ "tryEncoding, exception for \"" ++ show enc ++ "\": " ++ show e
+        tryEncoding r
+tryEncoding [] = requireHandle $ \h -> do
+  logM 1 $ "tryEncoding failed, reset handle encoding to: \"" ++ show utf8 ++ "\""
+  liftIO $ do
+    hSetEncoding h utf8
+    hGetLine h
 
 --
 -- Other
