@@ -81,7 +81,9 @@ myHirc = do
           handleCTCP text
           done
 
-      onValidPrefix handleUserCommands
+      onValidPrefix $
+        handleUserCommands `catch` \(e :: SomeException) -> do
+          logM 1 $ "User command exception: " ++ show e
 
       showUrlTitles
 

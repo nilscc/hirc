@@ -63,7 +63,7 @@ logLoop = do
       liftIO $ putStrLn s
 
 -- | Start the log loop in a `MState` thread
-startLogging :: (LogM (MState t m), Forkable m, MonadPeelIO m)
+startLogging :: (LogM (MState t m), MonadPeelIO m)
   => MState t m ()
 startLogging = do
   liftIO $ do

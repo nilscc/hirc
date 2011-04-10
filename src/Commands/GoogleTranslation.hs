@@ -57,7 +57,7 @@ getGoogleTranslation :: MonadIO m
 getGoogleTranslation source target text = liftIO $ do
   let source' = fromMaybe source $ languageByName source
       target' = fromMaybe target $ languageByName target
-  (code, rsp) <- curlGetString (apiUrl source' target' text) []
+  (code, rsp) <- curlGetString (apiUrl source' target' text) [CurlMaxFileSize (1000*1000)]
   case (code, parse json (BS.pack rsp)) of
        (CurlOK, Done _ j) ->
          case fromJSON j of
