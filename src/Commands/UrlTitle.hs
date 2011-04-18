@@ -8,6 +8,7 @@ module Commands.UrlTitle
 import Control.Arrow
 import Control.Monad
 import Control.Monad.Trans
+import Codec.Binary.UTF8.String
 import Data.Char
 import Text.HTML.TagSoup
 
@@ -16,12 +17,13 @@ import Network.Curl
 -- | Combination of performCurl and getTitle
 getTitle :: MonadIO m => URLString -> m (Maybe String)
 getTitle url = liftIO $ do
-  (code, s) <- curlGetString url [CurlFollowLocation True, CurlMaxFileSize (1000*1000)]
+  (code, s) <- curlGetString url [ CurlFollowLocation True, CurlMaxFileSize (1000*1000)
+                                 , CurlEncoding "UTF-8" ]
   return $
     case code of
          CurlOK -> let t = getTitle' s
                     in do guard (not $ null t)
-                          Just t
+                          Just $ decodeString t
          _      -> Nothing
 
 -- | Get the title element of our XML data
