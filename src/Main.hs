@@ -78,14 +78,16 @@ myHirc = do
       
       withParams $ \[_,text] ->
         when (isCTCP text) $ do
-          handleCTCP text
+          handleCTCP text `catch` \(e :: SomeException) ->
+            logM 1 $ "CTCP exception: " ++ show e
           done
 
       onValidPrefix $
-        handleUserCommands `catch` \(e :: SomeException) -> do
+        handleUserCommands `catch` \(e :: SomeException) ->
           logM 1 $ "User command exception: " ++ show e
 
-      showUrlTitles
+      showUrlTitles `catch` \(e :: SomeException) ->
+        logM 1 $ "Url title exception: " ++ show e
 
 --------------------------------------------------------------------------------
 -- User commands
