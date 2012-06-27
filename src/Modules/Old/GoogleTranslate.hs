@@ -1,8 +1,10 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, ViewPatterns, ScopedTypeVariables #-}
+{-# OPTIONS -fno-warn-incomplete-patterns #-}
 
-module Commands.GoogleTranslation
-    ( getGoogleTranslation
-    ) where
+module Modules.GoogleTranslate
+  ( googleTranslate
+  , getGoogleTranslation
+  ) where
 
 import Prelude hiding (concat, lines)
 
@@ -17,6 +19,27 @@ import Network.URL
 
 import qualified Data.ByteString.Char8  as BS
 import qualified Data.Map               as M
+
+import Hirc
+
+--------------------------------------------------------------------------------
+-- The main module
+
+googleTranslate :: Module
+googleTranslate = Module "Google Translate" $
+  onValidPrefix $
+    userCommand $ \("translate" :: String) lang1 lang2 (unwords -> what) -> do
+      result <- getGoogleTranslation lang1 lang2 what
+      case result of
+           Just (Right translation) -> withNickname $ \n -> do
+             logM 2 $ "Sending translation to " ++ show n
+             answer translation
+           e ->
+             logM 2 $ "Translation failed with: " ++ show e 
+      done
+
+--------------------------------------------------------------------------------
+-- Types & stuff
 
 -- Data types & Aeson instance
 

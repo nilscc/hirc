@@ -43,10 +43,10 @@ stdReconnect t = Reconnect t 0 (60 * 60 * 1) Nothing
 connect :: UserName     -- ^ nick
         -> UserName     -- ^ user
         -> UserName     -- ^ realname
-        -> Hirc ()
-connect nick' user' realname = do
+        -> HircM ()
+connect nick' user' rn = do
 
-  srv <- asks server
+  srv <- asks $ server . runningHirc
   h <- liftIO $
     connectTo (host srv) (PortNumber (port srv)) `catch` \(_ :: IOException) -> do
     error $ "Connection to \"" ++ host srv ++ ":" ++ show (port srv) ++ "\" failed."
@@ -60,11 +60,11 @@ connect nick' user' realname = do
   _ <- forkM receiveCommand
 
   sendCmd $ Send (nick nick')
-  sendCmd $ Send (user user' "*" "*" realname)
+  sendCmd $ Send (user user' "*" "*" rn)
   modifyM_ $ \s -> s
     { ircNickname = nick'
     , ircUsername = user'
-    , ircRealname = realname
+    , ircRealname = rn
     }
 
   waitFor001
@@ -72,7 +72,7 @@ connect nick' user' realname = do
   return ()
  where
   -- Wait for the 001 message before "giving away" our connection
-  waitFor001 :: Hirc ()
+  waitFor001 :: HircM ()
   waitFor001 = do
     msg <- getMsg
     logM 3 $ "waitFor001 --- " ++ show msg
@@ -82,21 +82,21 @@ connect nick' user' realname = do
 
 -- Sending/receiving commands/messages
 
-sendCmd :: ConnectionCommand -> Hirc ()
+sendCmd :: ConnectionCommand -> HircM ()
 sendCmd c = do
   cmd <- asks cmdChan
   liftIO $ writeChan cmd c
 
-getMsg :: Hirc Message
+getMsg :: HircM Message
 getMsg = do
   msg <- asks msgChan
   liftIO $ readChan msg
 
-sendMsg :: Message -> Hirc ()
+sendMsg :: Message -> HircM ()
 sendMsg m = requireHandle $ \h -> liftIO . hPutStrLn h $ encode m
 
 -- Wait for commands, execute them
-receiveCommand :: Hirc ()
+receiveCommand :: HircM ()
 receiveCommand = forever . requireHandle $ \h -> do
 
   cmd <- asks cmdChan
@@ -128,7 +128,7 @@ notice :: To -> String -> Message
 notice t s = mkMessage "NOTICE" [t,s]
 
 -- Listen on handle and put incoming messages to our Chan
-listenForMessages :: Hirc ()
+listenForMessages :: HircM ()
 listenForMessages = forever $ do
   l <- safeGetLine
   logM 3 $ "listenForMessage --- " ++ show l
@@ -138,13 +138,13 @@ listenForMessages = forever $ do
          liftIO $ writeChan msg m
        Nothing -> return () -- todo
 
-safeGetLine :: Hirc String
+safeGetLine :: HircM String
 safeGetLine = requireHandle $ \h ->
   catch (liftIO $ hGetLine h) $ \(e :: SomeException) -> do
     logM 1 $ "safeGetLine, exception: " ++ show e
     tryEncoding [latin1, utf16, utf32]
 
-tryEncoding :: [TextEncoding] -> Hirc String
+tryEncoding :: [TextEncoding] -> HircM String
 tryEncoding (enc:r) = requireHandle $ \h ->
   let io = finally (do hSetEncoding h enc
                        hGetLine h)
@@ -163,8 +163,8 @@ tryEncoding [] = requireHandle $ \h -> do
 -- Other
 --
 
-requireHandle :: (Handle -> Hirc a)
-              -> Hirc a
+requireHandle :: (Handle -> HircM a)
+              -> HircM a
 requireHandle hirc = do
   mh <- gets connectedHandle
   case mh of

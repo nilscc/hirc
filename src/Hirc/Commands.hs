@@ -32,6 +32,10 @@ runC wrds cmd = case cmd of
          []     -> return ()
   HC_Lams f    -> catchPatternException $
                     runC [] $ f wrds
+  HC_Pred p    ->
+    case wrds of
+         (w:ws) | p w -> runC ws cmd
+         _            -> return ()
 
 
 --------------------------------------------------------------------------------

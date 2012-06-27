@@ -15,7 +15,7 @@ import Hirc.Connection
 import Hirc.Types
 
 
-handleIncomingMessage :: WithMessage () -> Hirc ()
+handleIncomingMessage :: WithMessage () -> HircM ()
 handleIncomingMessage m = do
   msg <- getMsg
   runReaderT (m `catchError` noMsgErr) msg

@@ -11,7 +11,6 @@ data IrcServer = IrcServer
   { host        :: String
   , port        :: PortNumber
   , reconnects  :: Reconnect
-  , channels    :: [String]
   }
 
 data Reconnect = Reconnect

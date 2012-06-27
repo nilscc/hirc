@@ -1,8 +1,8 @@
 {-# LANGUAGE ViewPatterns #-}
--- TODO: Fix!
+{-# OPTIONS -fno-warn-incomplete-patterns #-}
 
-module Commands.UrlTitle
-    ( getTitle
+module Modules.UrlTitles
+    ( urlTitles
     ) where
 
 import Control.Arrow
@@ -11,8 +11,30 @@ import Control.Monad.Trans
 import Codec.Binary.UTF8.String
 import Data.Char
 import Text.HTML.TagSoup
+import Text.Regex.Posix
 
 import Network.Curl
+
+import Hirc
+
+--------------------------------------------------------------------------------
+-- The module
+
+urlTitles :: Module
+urlTitles = Module "URL Titles" $
+  withParams $ \[_,text] -> do
+    let urls = filter (=~ "^(http://|https://|www\\.)") (words text)
+    case urls of
+         (url:_) -> do
+           title <- getTitle url
+           maybe (return ())
+                 (answer' . ("Title: " ++))
+                 title
+         _ -> return ()
+
+
+--------------------------------------------------------------------------------
+-- Helper stuff
 
 -- | Combination of performCurl and getTitle
 getTitle :: MonadIO m => URLString -> m (Maybe String)

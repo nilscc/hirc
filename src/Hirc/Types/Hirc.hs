@@ -17,7 +17,17 @@ import Hirc.Types.Connection
 --------------------------------------------------------------------------------
 -- The Hirc monad
 
-type Hirc = MState HircState (ReaderT HircSettings (ErrorT HircError IO))
+data Hirc = Hirc
+  { server      :: IrcServer
+  , channels    :: [Channel]
+  , nickname    :: String
+  , username    :: String
+  , realname    :: String
+  , eventQueue  :: HircM ()
+  , modules     :: [Module]
+  }
+
+type HircM = MState HircState (ReaderT HircSettings (ErrorT HircError IO))
 
 data HircError
   = H_NotConnected
@@ -30,11 +40,10 @@ instance Error HircError where
   strMsg = H_Other
 
 data HircSettings = HircSettings
-  { server          :: IrcServer
+  { runningHirc     :: Hirc
   , cmdChan         :: Chan ConnectionCommand
   , msgChan         :: Chan Message
   , errMVar         :: MVar HircError
-  , runH            :: Hirc ()
   , logChanH        :: Chan (Int,String)
   , logSettingsH    :: LogSettings
   }
@@ -44,6 +53,31 @@ data HircState = HircState
   , ircNickname     :: String
   , ircUsername     :: String
   , ircRealname     :: String
+  }
+
+
+--------------------------------------------------------------------------------
+-- Message filter monad
+
+type WithMessage = ReaderT Message HircM
+
+class MonadPeelIO m => Filtered m where
+  runFiltered :: m () -> WithMessage ()
+
+instance Filtered WithMessage where
+  runFiltered = id
+
+instance Filtered HircM where
+  runFiltered = lift
+
+instance LogM WithMessage where
+  logChan     = lift logChan
+  logSettings = lift logSettings
+
+-- | Modules use the Message monad
+data Module = Module
+  { moduleName :: String
+  , runModule :: WithMessage ()
   }
 
 
@@ -67,7 +101,7 @@ class MonadPeelIO m => LogM m where
   logChan     :: m (Chan (Int,String))
   logSettings :: m LogSettings
 
-instance LogM Hirc where
+instance LogM HircM where
   logChan     = asks logChanH
   logSettings = asks logSettingsH
 

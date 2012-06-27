@@ -1,4 +1,13 @@
-.PHONY: all
+.PHONY: all install run clean
 
-all:
+all: install
+
+install:
 	cabal install --bindir=.
+
+run: install
+	./hirc
+
+clean:
+	cabal clean
+	-rm hirc

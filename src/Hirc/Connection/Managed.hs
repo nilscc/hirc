@@ -18,66 +18,76 @@ import Hirc.Types
 import Hirc.Logging
 -- import Utils
 
---
--- Run MStates
---
+run :: MonadIO m => [Hirc] -> m ()
+run hircs = do
+  runManaged $ mapM_ manage hircs
 
-run :: Managed a -> IO a
-run m = do
-    c <- newChan
+--------------------------------------------------------------------------------
+-- | Run managed sessions
+runManaged :: MonadIO m => Managed a -> m a
+runManaged m = do
+    c <- liftIO $ newChan
     let settings = ManagedSettings
           { logChanM     = c
           , logSettingsM = debugManagedSettings
           }
-    runReaderT (evalMState True (startLogging >> m) defState) settings
+    liftIO $ runReaderT (evalMState True (startLogging >> m) defState) settings
   where
     defState :: ManagedState
     defState = ManagedState
 
-runHirc :: HircSettings -> Hirc a -> IO (Either HircError a)
-runHirc s r = runErrorT (runReaderT (evalMState True r defState) s)
+--------------------------------------------------------------------------------
+-- Manage sessions
+
+runHircM :: MonadIO m => HircSettings -> HircM a -> m (Either HircError a)
+runHircM s r = liftIO $ runErrorT (runReaderT (evalMState True (setState >> r) defState) s)
   where
     defState :: HircState
     defState = HircState Nothing "" "" ""
+    setState :: HircM ()
+    setState = do
+      h <- asks runningHirc
+      modify $ \hs -> hs
+        { ircNickname = nickname h
+        , ircUsername = username h
+        , ircRealname = realname h
+        }
 
-runHircWithSettings :: HircSettings -> Hirc () -> Managed ()
+runHircWithSettings :: HircSettings -> HircM () -> Managed ()
 runHircWithSettings settings hirc = do
-  merr <- liftIO $ runHirc settings hirc
+  merr <- runHircM settings hirc
   case merr of
        Left err -> handleHircError err settings hirc
        Right _  -> return ()
 
 
--- | Start a new connection and prepare it to be managed by `manageConnections`
-manage :: IrcServer
-       -> Hirc ()
+-- | Start and manage new connections
+manage :: Hirc
        -> Managed ()
-manage srv hirc = do
+manage hirc = do
   cmd <- liftIO newChan
   msg <- liftIO newChan
   err <- liftIO newEmptyMVar
   lc  <- liftIO newChan
-  let settings = HircSettings
-        { server       = srv
+  let srv = server hirc
+      settings = HircSettings
+        { runningHirc  = hirc
         , cmdChan      = cmd
         , msgChan      = msg
         , errMVar      = err
-        , runH         = hirc
         , logChanH     = lc
         , logSettingsH = debugHircSettings srv
         }
   forkM $
-    runHircWithSettings settings (startLogging >> hirc)
+    runHircWithSettings settings (startLogging >> eventQueue hirc)
   logM 1 $ "Managing new server: " ++ host srv ++ ":" ++ show (port srv)
 
-
---
+--------------------------------------------------------------------------------
 -- Error handling
---
 
 handleHircError :: HircError
                 -> HircSettings
-                -> Hirc ()
+                -> HircM ()
                 -> Managed ()
 
 {-

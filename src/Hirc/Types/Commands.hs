@@ -5,7 +5,6 @@ module Hirc.Types.Commands where
 import Control.Monad.Reader
 
 import Hirc.Types.Hirc
-import Hirc.Types.Message
 
 
 data HircCommand
@@ -13,6 +12,7 @@ data HircCommand
   | HC_WithMsg      (WithMessage HircCommand)
   | HC_Lam          (String   -> HircCommand)
   | HC_Lams         ([String] -> HircCommand)
+  | HC_Pred         (String -> Bool)
 
 class IsHircCommand a where
   toCmd :: a -> HircCommand
@@ -29,11 +29,14 @@ instance IsHircCommand a => IsHircCommand ([String] -> a) where
 instance IsHircCommand a => IsHircCommand (WithMessage a) where
   toCmd wm   = HC_WithMsg (fmap toCmd wm)
 
-instance IsHircCommand a => IsHircCommand (Hirc a) where
+instance IsHircCommand a => IsHircCommand (HircM a) where
   toCmd hirc = HC_WithMsg (fmap toCmd $ lift hirc)
 
 instance IsHircCommand a => IsHircCommand (IO a) where
   toCmd io   = HC_WithMsg (fmap toCmd $ liftIO io)
+
+instance IsHircCommand (String -> Bool) where
+  toCmd p    = HC_Pred    p
 
 --------------------------------------------------------------------------------
 -- Basic type instances
