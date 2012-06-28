@@ -14,7 +14,6 @@ pokerModule = Module "Poker" (Just updatePlayers) $ do
 
   onValidPrefix $ do
 
-    userCommand $ \"count" -> startCounting
     userCommand $ \"play" "poker" -> startGame
     userCommand $ \"help" "poker" -> showHelp
     userCommand $ \"quit" "poker" -> quitGame
