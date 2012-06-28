@@ -8,3 +8,4 @@ module Hirc.Types
 import Hirc.Types.Commands
 import Hirc.Types.Connection
 import Hirc.Types.Hirc
+import Hirc.Types.Instances ()

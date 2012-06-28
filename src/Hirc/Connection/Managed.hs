@@ -13,6 +13,7 @@ import Control.Concurrent.MState
 import Control.Monad.Error
 import Control.Monad.Reader
 -- import Data.Time
+import qualified Data.Map as M
 
 import Hirc.Types
 import Hirc.Logging
@@ -43,7 +44,7 @@ runHircM :: MonadIO m => HircSettings -> HircM a -> m (Either HircError a)
 runHircM s r = liftIO $ runErrorT (runReaderT (evalMState True (setState >> r) defState) s)
   where
     defState :: HircState
-    defState = HircState Nothing "" "" ""
+    defState = HircState Nothing "" "" "" M.empty
     setState :: HircM ()
     setState = do
       h <- asks runningHirc

@@ -13,18 +13,23 @@ module Hirc
   , HircError (..)
   , HircState (..)
   , HircSettings (..)
-  , Module (..)
 
   , getNickname
   , getUsername
   , getRealname
   , setNickname
 
+    -- ** Module types & functions
+  , Module (..)
+  , IsModuleStateValue (..)
+  , Map
+  , module Hirc.ModuleState
+
     -- ** Messages and user commands
-  , WithMessage
+  , MessageM
   , module Hirc.Messages
   , module Hirc.Commands
-  , answerTo, answer, answer'
+  , say, whisper, answerTo, answer, answer'
   , onValidPrefix
 
     -- ** Managed types
@@ -48,6 +53,7 @@ module Hirc
   , module Hirc.Logging
 
     -- * Reexports
+  , module Hirc.Utils
   , module Control.Concurrent.MState
   , module Control.Monad.Reader
   , module Control.Exception.Peel
@@ -56,6 +62,7 @@ module Hirc
 
 import Prelude                      hiding (catch)
 
+import Control.Arrow
 import Control.Concurrent.MState
 import Control.Monad.Reader
 import Control.Exception.Peel
@@ -64,29 +71,40 @@ import Text.Regex.Posix
 import Hirc.Commands
 import Hirc.Connection
 import Hirc.Messages
+import Hirc.ModuleState
 import Hirc.Logging
 import Hirc.Types
+import Hirc.Utils
 
-setNickname :: String -> HircM ()
-setNickname n = modifyM_ $ \s -> s { ircNickname = n }
+setNickname :: String -> MessageM ()
+setNickname n = lift $ modifyM_ $ \s -> s { ircNickname = n }
 
-getNickname :: HircM String
+getNickname :: MessageM String
 getNickname = gets ircNickname
 
-getUsername :: HircM String
+getUsername :: MessageM String
 getUsername = gets ircUsername
 
-getRealname :: HircM String
+getRealname :: MessageM String
 getRealname = gets ircRealname
 
 --------------------------------------------------------------------------------
--- IRC replies
+-- IRC stuff
+
+say :: String       -- ^ channel or persons name
+    -> String
+    -> MessageM ()
+say to str = lift . sendCmd $ PrivMsg to str
+
+-- | Reply in a query to the user of the current message
+whisper :: String -> MessageM ()
+whisper txt = withNickname $ \n -> say n txt
 
 answerTo :: Filtered m
          => (Either String String -> m ())
-         -> WithMessage ()
+         -> MessageM ()
 answerTo m = withParams $ \[c,_] -> do
-  n <- lift getNickname
+  n <- getNickname
   if c == n then
     -- private message to user
     withNickname $ m . Left
@@ -96,7 +114,7 @@ answerTo m = withParams $ \[c,_] -> do
 
 -- | Answer and add the nick for public channels
 answer :: String
-       -> WithMessage ()
+       -> MessageM ()
 answer text =
   answerTo $
     either (\n -> lift $
@@ -106,7 +124,7 @@ answer text =
 
 -- | Answer without prefix the nick in a public channel
 answer' :: String
-        -> WithMessage ()
+        -> MessageM ()
 answer' text =
   answerTo $ \to ->
     sendCmd $ PrivMsg (either id id to) text
@@ -114,11 +132,11 @@ answer' text =
 --------------------------------------------------------------------------------
 -- IRC tests
 
-onValidPrefix :: WithMessage ()
-              -> WithMessage ()
+onValidPrefix :: MessageM ()
+              -> MessageM ()
 onValidPrefix wm =
   withParams $ \[c,_] -> do
-    myNick <- lift getNickname
+    myNick <- getNickname
     if c == myNick then
       -- direct query
       wm
@@ -182,10 +200,14 @@ defEventQueue = do
   chs <- asks $ channels . runningHirc
   mapM_ joinCmd chs
 
+
   let logException (e :: IOException) = do
         logM 1 $ "IO exception: " ++ show e
         sendCmd $ Quit Nothing
   handle logException . forever . handleIncomingMessage $ do
+
+    -- load modules
+    mods <- lift . asks $ modules . runningHirc
 
     onCommand "PING" $
       pongCmd
@@ -196,9 +218,13 @@ defEventQueue = do
       doneAfter       $ do
         myNick <- getNickname
         myUser <- getUsername
-        when (n == myNick && u == myUser) $ do
-             setNickname new
-             logM 1 $ "Nick changed to \"" ++ new ++ "\""
+        if n == myNick && u == myUser then do
+           setNickname new
+           logM 1 $ "Nick changed to \"" ++ new ++ "\""
+         else
+           -- call `onNickChange' if existant
+           mapM_ (\m -> withModCtxt m (maybe (return ()) (\f -> f u new) (onNickChange m)) `catch` moduleException m)
+                 mods
 
     onCommand "INVITE" $
       withParams $ \[_,chan] -> joinCmd chan
@@ -213,14 +239,15 @@ defEventQueue = do
           done
 
       -- run user modules
-      mods <- lift . asks $ modules . runningHirc
-      mapM_ (\m -> runModule m `catch` moduleException m) mods
-
+      mapM_ (\m -> withModCtxt m (runModule m) `catch` moduleException m)
+            mods
+ where
+  withModCtxt m f = local (second $ \ctxt -> ctxt { ctxtModule = Just m }) f
 
 --------------------------------------------------------------------------------
 -- Exceptions
 
-moduleException :: Module -> SomeException -> WithMessage ()
+moduleException :: Module -> SomeException -> MessageM ()
 moduleException Module{ moduleName } e =
   logM 1 $ "Module exception in \"" ++ moduleName ++ "\": " ++ show e
 
@@ -233,7 +260,7 @@ isCTCP s = not (null s)
         && head s == '\001' 
         && last s == '\001'
 
-handleCTCP :: String -> WithMessage ()
+handleCTCP :: String -> MessageM ()
 
 handleCTCP "\001VERSION\001" =
   withNickname $ \to -> do
@@ -242,4 +269,3 @@ handleCTCP "\001VERSION\001" =
 
 handleCTCP t =
   logM 2 $ "Unhandled CTCP: " ++ t
-

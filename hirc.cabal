@@ -15,6 +15,7 @@ executable hirc
     build-depends:
         base == 4.*,
         mtl == 2.*,
+        containers == 0.*,
         network == 2.*,
         curl == 1.*,
         time == 1.*,

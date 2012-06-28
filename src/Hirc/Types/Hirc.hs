@@ -1,7 +1,8 @@
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE TypeSynonymInstances, MultiParamTypeClasses #-}
 
 module Hirc.Types.Hirc where
 
+import Data.Time
 import Control.Concurrent.Chan
 import Control.Concurrent.MVar
 import Control.Concurrent.MState
@@ -11,20 +12,25 @@ import Control.Monad.Error
 import Network.IRC
 import System.IO
 
+import qualified Data.Map as M
+import qualified Data.Set as S
+
 import Hirc.Types.Connection
 
+
+type NickName = String
 
 --------------------------------------------------------------------------------
 -- The Hirc monad
 
 data Hirc = Hirc
-  { server      :: IrcServer
-  , channels    :: [Channel]
-  , nickname    :: String
-  , username    :: String
-  , realname    :: String
-  , eventQueue  :: HircM ()
-  , modules     :: [Module]
+  { server        :: IrcServer
+  , channels      :: [Channel]
+  , nickname      :: String
+  , username      :: String
+  , realname      :: String
+  , eventQueue    :: HircM ()
+  , modules       :: [Module]
   }
 
 type HircM = MState HircState (ReaderT HircSettings (ErrorT HircError IO))
@@ -35,9 +41,6 @@ data HircError
   | H_ConnectionFailed
   | H_Other String
   deriving (Show, Eq)
-
-instance Error HircError where
-  strMsg = H_Other
 
 data HircSettings = HircSettings
   { runningHirc     :: Hirc
@@ -53,32 +56,56 @@ data HircState = HircState
   , ircNickname     :: String
   , ircUsername     :: String
   , ircRealname     :: String
+  , moduleState     :: M.Map ModuleName ModuleState
   }
 
 
 --------------------------------------------------------------------------------
 -- Message filter monad
 
-type WithMessage = ReaderT Message HircM
+type MessageM = ReaderT (Message, Context) HircM
+
+data Context = Context
+  { ctxtModule :: Maybe Module
+  }
 
 class MonadPeelIO m => Filtered m where
-  runFiltered :: m () -> WithMessage ()
+  runFiltered :: m a -> MessageM a
 
-instance Filtered WithMessage where
-  runFiltered = id
 
-instance Filtered HircM where
-  runFiltered = lift
+--------------------------------------------------------------------------------
+-- Modules
 
-instance LogM WithMessage where
-  logChan     = lift logChan
-  logSettings = lift logSettings
+type ModuleName = String
 
 -- | Modules use the Message monad
 data Module = Module
-  { moduleName :: String
-  , runModule :: WithMessage ()
+  { moduleName    :: ModuleName
+  , onNickChange  :: Maybe (UserName -> NickName -> MessageM ())
+  , runModule     :: MessageM ()
   }
+
+data ModuleStateValue
+  = MSV_String  String
+  | MSV_Int     Integer
+  | MSV_Bool    Bool
+  | MSV_Time    UTCTime
+  | MSV_Tup2    (ModuleStateValue, ModuleStateValue)
+  | MSV_Tup3    (ModuleStateValue, ModuleStateValue, ModuleStateValue)
+  | MSV_Tup4    (ModuleStateValue, ModuleStateValue, ModuleStateValue, ModuleStateValue)
+  | MSV_Tup5    (ModuleStateValue, ModuleStateValue, ModuleStateValue, ModuleStateValue, ModuleStateValue)
+  | MSV_Set     (S.Set ModuleStateValue)
+  | MSV_Map     Map
+  deriving (Eq, Ord, Show)
+
+newtype Map = Map { unMSV_Map :: M.Map String ModuleStateValue }
+  deriving (Eq, Ord, Show)
+
+type ModuleState = M.Map String ModuleStateValue
+
+class Eq a => IsModuleStateValue a where
+  toMSV   :: a -> ModuleStateValue
+  fromMSV :: ModuleStateValue -> Maybe a
 
 
 --------------------------------------------------------------------------------
@@ -100,14 +127,6 @@ data ManagedSettings = ManagedSettings
 class MonadPeelIO m => LogM m where
   logChan     :: m (Chan (Int,String))
   logSettings :: m LogSettings
-
-instance LogM HircM where
-  logChan     = asks logChanH
-  logSettings = asks logSettingsH
-
-instance LogM Managed where
-  logChan     = asks logChanM
-  logSettings = asks logSettingsM
 
 data LogSettings = LogSettings
   { logLevel      :: Int

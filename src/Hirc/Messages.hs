@@ -6,8 +6,11 @@
 module Hirc.Messages where
 
 import Prelude hiding (catch)
+import Control.Concurrent.MState
+import Control.Monad
 import Control.Monad.Error
 import Control.Monad.Reader
+import Control.Monad.IO.Peel
 import Control.Exception.Peel
 import qualified Network.IRC as IRC
 
@@ -15,56 +18,72 @@ import Hirc.Connection
 import Hirc.Types
 
 
-handleIncomingMessage :: WithMessage () -> HircM ()
+handleIncomingMessage :: MessageM () -> HircM ()
 handleIncomingMessage m = do
   msg <- getMsg
-  runReaderT (m `catchError` noMsgErr) msg
+  runReaderT (m `catchError` noMsgErr) (msg, nullCtxt)
  where
   noMsgErr e | e == noMsg = return ()
              | otherwise  = throwError e
+  nullCtxt = Context { ctxtModule = Nothing }
 
-done :: WithMessage ()
+done :: MonadPlus m => m ()
 done = mzero
 
-doneAfter :: Filtered m => m () -> WithMessage ()
+doneAfter :: (MonadPlus m, Filtered m) => m () -> MessageM ()
 doneAfter m = runFiltered m >> done
 
 
 --------------------------------------------------------------------------------
 -- Filter
 
+getMessage :: MessageM Message
+getMessage = fmap fst ask
+
+getCurrentChannel :: MessageM (Maybe String)
+getCurrentChannel = do
+  msg <- getMessage
+  let cmd    = IRC.msg_command msg
+      (ch:_) = IRC.msg_params msg
+  me  <- gets ircNickname
+  return $
+    if cmd == "PRIVMSG" && ch /= me then
+       Just ch
+     else
+       Nothing
+
 onCommand :: Filtered m
           => String
           -> m ()
-          -> WithMessage ()
+          -> MessageM ()
 onCommand c m = do
-  c' <- asks IRC.msg_command
+  c' <- fmap IRC.msg_command getMessage
   when (c == c') (runFiltered m)
 
 withParams :: Filtered m
            => ([String] -> m ())
-           -> WithMessage ()
+           -> MessageM ()
 withParams m = do
-  ps <- asks IRC.msg_params
+  ps <- fmap IRC.msg_params getMessage
   catchPatternException $ runFiltered (m ps)
 
 withNickname :: Filtered m
              => (String -> m ())
-             -> WithMessage ()
+             -> MessageM ()
 withNickname m = catchPatternException $ do
-  Just (NickName n _ _) <- asks IRC.msg_prefix
+  Just (NickName n _ _) <- fmap IRC.msg_prefix getMessage
   runFiltered (m n)
 
 withUsername :: Filtered m
              => (String -> m ())
-             -> WithMessage ()
+             -> MessageM ()
 withUsername m = catchPatternException $ do
-  Just (NickName _ (Just u) _) <- asks IRC.msg_prefix
+  Just (NickName _ (Just u) _) <- fmap IRC.msg_prefix getMessage
   runFiltered (m u)
 
 withNickAndUser :: Filtered m
                 => (String -> String -> m ())
-                -> WithMessage ()
+                -> MessageM ()
 withNickAndUser m =
   withNickname $ \n ->
   withUsername $ \u ->
@@ -72,18 +91,17 @@ withNickAndUser m =
 
 withServer :: Filtered m
            => (String -> m ())
-           -> WithMessage ()
+           -> MessageM ()
 withServer m = catchPatternException $ do
-  Just p <- asks IRC.msg_prefix
+  Just p <- fmap IRC.msg_prefix getMessage
   case p of
        Server n              -> runFiltered (m n)
        NickName _ _ (Just n) -> runFiltered (m n)
        _                     -> return ()
 
-
 --------------------------------------------------------------------------------
 -- Exceptions
 
-catchPatternException :: WithMessage () -> WithMessage ()
+catchPatternException :: MonadPeelIO m => m () -> m ()
 catchPatternException =
   handle $ \(PatternMatchFail _) -> return ()

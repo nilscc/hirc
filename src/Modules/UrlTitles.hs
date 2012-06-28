@@ -21,7 +21,7 @@ import Hirc
 -- The module
 
 urlTitles :: Module
-urlTitles = Module "URL Titles" $
+urlTitles = Module "UrlTitles" Nothing $ do
   withParams $ \[_,text] -> do
     let urls = filter (=~ "^(http://|https://|www\\.)") (words text)
     case urls of
