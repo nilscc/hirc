@@ -109,6 +109,7 @@ receiveCommand = forever . requireHandle $ \h -> do
        Notice to msg      -> sendMsg $ notice to msg
        Join chan          -> sendMsg $ joinChan chan
        Part chan          -> sendMsg $ part chan
+       Nick new           -> sendMsg $ nick new
 
        Ping               -> sendMsg $ Message Nothing "PING" []
        Pong               -> sendMsg $ Message Nothing "PONG" []

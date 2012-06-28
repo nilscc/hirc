@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternGuards #-}
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 
 module Hirc.Modules.Admin
@@ -14,10 +15,10 @@ adminModule settings = Module "Admin" Nothing $ do
   currentChannel <- getCurrentChannel
   onValidPrefix $ do
     userCommand $ \"auth" pw         -> auth pw settings
-    userCommand $ \"join" channel    -> requireAuth $ joinChannel channel
-    userCommand $ \"part" channel    -> doneAfter $ requireAuth $ partChannel channel
-    userCommand $ \"part"            -> doneAfter $ requireAuth $ maybe (return ()) partChannel currentChannel
-    userCommand $ \"set" "nick" name -> requireAuth $ setNickname name
+    userCommand $ \"join" channel    -> requireAuth settings $ joinChannel channel
+    userCommand $ \"part" channel    -> doneAfter $ requireAuth settings $ partChannel channel
+    userCommand $ \"part"            -> doneAfter $ requireAuth settings $ maybe (return ()) partChannel currentChannel
+    userCommand $ \"set" "nick" name -> requireAuth settings $ changeNickname name
     userCommand $ \"help" "admin"    -> showHelp
 
 showHelp :: MessageM ()
@@ -29,24 +30,31 @@ showHelp = do
   whisper "  part [<channel>]   --   part either the current or the specified channel"
   whisper "  set nick <name>    --   set a new nickname"
 
-newtype AdminSettings = AdminSettings { adminPassword :: String }
+data AdminSettings = AdminSettings
+  { adminPassword :: Maybe String
+  , adminUsers    :: [Username]
+  }
 
 auth :: String -> AdminSettings -> MessageM ()
 auth pw settings
-  | pw == adminPassword settings = withUsername $ \uname -> do
-    updateGlobal "admins" $ \ml -> case ml of
-      Nothing -> singletonList uname
-      Just l  -> concatList uname l
-    answer "You're successfully authenticated."
+  | Nothing <- adminPassword settings =
+    answer "Password authentication disabled."
+  | Just settingsPw <- adminPassword settings
+  , pw == settingsPw =
+    withUsername $ \uname -> do
+      updateGlobal "admins" $ \ml -> case ml of
+        Nothing -> singletonList uname
+        Just l  -> concatList uname l
+      answer "You're successfully authenticated."
   | otherwise = do
     answer "Incorrect password."
 
-requireAuth :: MessageM () -> MessageM ()
-requireAuth m = do
+requireAuth :: AdminSettings -> MessageM () -> MessageM ()
+requireAuth settings m = do
   withUsername $ \uname -> do
-    global  <- fmap (fromMaybe emptyList) (loadGlobal "admins")
-    channel <- fmap (fromMaybe emptyList) (load "admins")
-    let admins = appendList global channel
-    if (uname `elemList` admins)
+    global   <- fmap (fromMaybe [] . join . fmap fromList) (loadGlobal "admins")
+    channel  <- fmap (fromMaybe [] . join . fmap fromList) (load "admins")
+    let admins = adminUsers settings ++ global ++ channel
+    if (uname `elem` admins)
        then m
        else answer "You don't have permission to do that."

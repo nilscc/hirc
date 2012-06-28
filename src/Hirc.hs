@@ -14,7 +14,7 @@ module Hirc
   --, HircState (..)
   --, HircSettings (..)
 
-  , getNickname, getUsername, getRealname, setNickname
+  , getNickname, getUsername, getRealname, changeNickname
 
     -- * Module types & functions
   , Module (..)
@@ -79,14 +79,18 @@ import Hirc.Logging
 import Hirc.Types
 import Hirc.Utils
 
+changeNickname :: Nickname -> MessageM ()
+changeNickname n = lift $ sendCmd $ Nick n
+
 setNickname :: String -> MessageM ()
 setNickname n = lift $ modifyM_ $ \s -> s { ircNickname = n }
 
 getNickname :: MessageM String
 getNickname = gets ircNickname
 
+-- | Get current hostname. If there is a leading '~' it is discarded.
 getUsername :: MessageM String
-getUsername = gets ircUsername
+getUsername = dropWhile (== '~') `fmap` gets ircUsername
 
 getRealname :: MessageM String
 getRealname = gets ircRealname

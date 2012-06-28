@@ -5,13 +5,14 @@ module Hirc.ModuleState
   , (~>)
 
     -- ** List functions
-  , emptyList, concatList, singletonList, appendList, nullList
+  , toList, fromList, emptyList, concatList, singletonList, appendList, nullList
   , headList, tailList, initList, lengthList, takeList, dropList
   , reverseList, mapList, elemList
 
     -- ** Map functions
-  , emptyMap, insertMap, alterMap, lookupMap, singletonMap, memberMap
-  , mapWithKeyMap, adjustMap, deleteMap, elemsMap, keysMap, nullMap
+  , emptyMap, insertMap, alterMap, lookupMap
+  , singletonMap, memberMap, mapWithKeyMap, adjustMap, deleteMap
+  , elemsMap, keysMap, nullMap
   ) where
 
 import Data.Maybe
@@ -130,6 +131,12 @@ loadCmd ~> k = do
 
 --------------------------------------------------------------------------------
 -- `List' functions
+
+toList :: IsModuleStateValue v => [v] -> List
+toList l = List (map toMSV l)
+
+fromList :: IsModuleStateValue v => List -> Maybe [v]
+fromList (List l) = sequence $ map fromMSV l
 
 emptyList :: List
 emptyList = List []

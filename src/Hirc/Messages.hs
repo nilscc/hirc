@@ -75,12 +75,14 @@ withNickname m = catchPatternException $ do
   Just (NickName n _ _) <- fmap IRC.msg_prefix getMessage
   runFiltered (m n)
 
+-- | Get the username of the current message. If there is a leading '~' it is
+-- discarded.
 withUsername :: Filtered m
              => (Username -> m ())
              -> MessageM ()
 withUsername m = catchPatternException $ do
   Just (NickName _ (Just u) _) <- fmap IRC.msg_prefix getMessage
-  runFiltered (m u)
+  runFiltered (m $ dropWhile (== '~') u)
 
 withNickAndUser :: Filtered m
                 => (Nickname -> Username -> m ())

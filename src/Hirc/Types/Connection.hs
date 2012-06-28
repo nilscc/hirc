@@ -30,6 +30,7 @@ data ConnectionCommand
   | Notice Nickname String
   | Join Channel
   | Part Channel
+  | Nick Nickname
   | Ping
   | Pong
   | Quit (Maybe String)
