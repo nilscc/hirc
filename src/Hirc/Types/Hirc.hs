@@ -94,19 +94,24 @@ data ModuleStateValue
   | MSV_Int     Integer
   | MSV_Bool    Bool
   | MSV_Time    UTCTime
+  | MSV_List    List
+  | MSV_Map     Map
   | MSV_Maybe   (Maybe ModuleStateValue)
   | MSV_Tup2    (ModuleStateValue, ModuleStateValue)
   | MSV_Tup3    (ModuleStateValue, ModuleStateValue, ModuleStateValue)
   | MSV_Tup4    (ModuleStateValue, ModuleStateValue, ModuleStateValue, ModuleStateValue)
   | MSV_Tup5    (ModuleStateValue, ModuleStateValue, ModuleStateValue, ModuleStateValue, ModuleStateValue)
   | MSV_Set     (S.Set ModuleStateValue)
-  | MSV_Map     Map
   deriving (Eq, Ord, Show)
 
 -- | The `Map' type is a weakly typed @String => ModuleStateValue@ map. Type
 -- interference will convert `ModuleStateValue's to the corresponding basic
 -- Haskell type (if possible) when using the `Map'-functions listed below.
 newtype Map = Map { unMSV_Map :: M.Map String ModuleStateValue }
+  deriving (Eq, Ord, Show)
+
+-- | Weakly typed @ModuleStateValue@ list. Similar behaviour to `Map'.
+newtype List = List { unLSV_List :: [ModuleStateValue] }
   deriving (Eq, Ord, Show)
 
 type ModuleState = M.Map String ModuleStateValue

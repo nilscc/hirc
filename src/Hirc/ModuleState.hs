@@ -4,6 +4,11 @@ module Hirc.ModuleState
   , updateAll
   , (~>)
 
+    -- ** List functions
+  , emptyList, concatList, singletonList, appendList, nullList
+  , headList, tailList, initList, lengthList, takeList, dropList
+  , reverseList, mapList, elemList
+
     -- ** Map functions
   , emptyMap, insertMap, alterMap, lookupMap, singletonMap, memberMap
   , mapWithKeyMap, adjustMap, deleteMap, elemsMap, keysMap, nullMap
@@ -122,6 +127,55 @@ loadCmd ~> k = do
     res <- mres
     msv <- lookupMap k res
     fromMSV msv
+
+--------------------------------------------------------------------------------
+-- `List' functions
+
+emptyList :: List
+emptyList = List []
+
+concatList :: IsModuleStateValue v => v -> List -> List
+concatList v (List l) = List ((toMSV v) : l)
+
+singletonList :: IsModuleStateValue v => v -> List
+singletonList v = concatList v emptyList
+
+appendList :: List -> List -> List
+appendList (List l1) (List l2) = List (l1 ++ l2)
+
+nullList :: List -> Bool
+nullList (List l) = null l
+
+headList :: IsModuleStateValue v => List -> Maybe v
+headList (List l)
+  | null l    = Nothing
+  | otherwise = fromMSV (head l)
+
+tailList :: List -> List
+tailList (List l) = List (tail l)
+
+initList :: List -> List
+initList (List l) = List (init l)
+
+lengthList :: List -> Int
+lengthList (List l) = length l
+
+takeList :: Int -> List -> List
+takeList i (List l) = List (take i l)
+
+dropList :: Int -> List -> List
+dropList i (List l) = List (drop i l)
+
+reverseList :: List -> List
+reverseList (List l) = List (reverse l)
+
+-- | Map over the list, the mapping function is only applied if the conversion
+-- from the @ModuleStateValue@ to @v@ is not @Nothing@.
+mapList :: (IsModuleStateValue v, IsModuleStateValue w) => (v -> w) -> List -> List
+mapList f (List l) = List (map (\v -> fromMaybe v $ fmap (toMSV . f) $ fromMSV v) l)
+
+elemList :: IsModuleStateValue v => v -> List -> Bool
+elemList v (List l) = toMSV v `elem` l
 
 --------------------------------------------------------------------------------
 -- `Map' functions

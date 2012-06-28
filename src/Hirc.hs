@@ -14,14 +14,12 @@ module Hirc
   --, HircState (..)
   --, HircSettings (..)
 
-  , getNickname
-  , getUsername
-  , getRealname
-  --, setNickname
+  , getNickname, getUsername, getRealname, setNickname
 
     -- * Module types & functions
   , Module (..)
   , IsModuleStateValue -- (..)
+  , List
   , Map
   , module Hirc.ModuleState
 
@@ -32,7 +30,6 @@ module Hirc
   , userCommand, onValidPrefix --, onCommand
   , done, doneAfter, getMessage, getCurrentChannel
   , withNickname, withUsername, withNickAndUser, withServer, withParams
-
 
     -- * IRC types & functions
   , Message (..)
@@ -46,6 +43,10 @@ module Hirc
   , Realname
   , answer, say, whisper, answerTo
   , joinChannel, partChannel, sendNotice, quitServer
+
+    -- * Concurrency
+  , newThread
+  , wait
 
     -- * Logging
   , LogM (..)
@@ -64,6 +65,7 @@ module Hirc
 import Prelude                      hiding (catch)
 
 import Control.Arrow
+import Control.Concurrent
 import Control.Concurrent.MState
 import Control.Monad.Reader
 import Control.Exception.Peel
@@ -282,3 +284,16 @@ handleCTCP "\001VERSION\001" =
 
 handleCTCP t =
   logM 2 $ "Unhandled CTCP: " ++ t
+
+
+--------------------------------------------------------------------------------
+-- Concurrency
+
+newThread :: MessageM () -> MessageM ThreadId
+newThread m = do
+  r <- ask
+  lift $ forkM (runReaderT m r :: HircM ())
+
+wait :: Int   -- ^ number of seconds
+     -> MessageM ()
+wait sec = liftIO $ threadDelay (sec * 1000000)

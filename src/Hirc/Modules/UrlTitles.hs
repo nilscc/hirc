@@ -2,7 +2,7 @@
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 
 module Hirc.Modules.UrlTitles
-    ( urlTitles
+    ( urlTitlesModule
     ) where
 
 import Control.Arrow
@@ -20,8 +20,8 @@ import Hirc
 --------------------------------------------------------------------------------
 -- The module
 
-urlTitles :: Module
-urlTitles = Module "UrlTitles" Nothing $ do
+urlTitlesModule :: Module
+urlTitlesModule = Module "UrlTitles" Nothing $ do
   withParams $ \[_,text] -> do
     let urls = filter (=~ "^(http://|https://|www\\.)") (words text)
     case urls of

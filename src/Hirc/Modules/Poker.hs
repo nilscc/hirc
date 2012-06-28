@@ -2,32 +2,23 @@
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 
 module Hirc.Modules.Poker
-  ( poker
+  ( pokerModule
   ) where
 
 import Data.List
 
 import Hirc
 
-poker :: Module
-poker = Module "Poker" (Just updatePlayers) $ do
-
-  state <- load "state"
+pokerModule :: Module
+pokerModule = Module "Poker" (Just updatePlayers) $ do
 
   onValidPrefix $ do
 
-    userCommand $ \"poker" "start" -> do
-      if (state == Nothing || state == Just "ended") then do
-        answerTo $ \who ->
-          case who of
-               Left  _ -> answer "Sorry, but this game needs to be run in a public channel."
-               Right _ -> startGame
-       else do
-        answer "Poker game already in progress. You can play only one game per channel."
-
-    userCommand $ \"poker" "help" -> showHelp
-    userCommand $ \"poker" "quit" -> quitGame
-    userCommand $ \"poker" "join" -> acceptPlayers
+    userCommand $ \"count" -> startCounting
+    userCommand $ \"play" "poker" -> startGame
+    userCommand $ \"help" "poker" -> showHelp
+    userCommand $ \"quit" "poker" -> quitGame
+    userCommand $ \"join" "poker" -> acceptPlayers
 
   userCommand $ \"players" -> showPlayers
 
@@ -39,6 +30,7 @@ updatePlayers un nn = do
        then insertMap un nn m
        else m
 
+
 --------------------------------------------------------------------------------
 -- Information
 
@@ -46,32 +38,41 @@ updatePlayers un nn = do
 showHelp :: MessageM ()
 showHelp = do
   whisper "Available commands:"
-  whisper "  <bot>: poker start   --   start a new game"
-  whisper "  <bot>: poker help    --   show this help"
-  whisper "  <bot>: poker join    --   join a new game"
-  whisper "  <bot>: poker quit    --   quit the current game"
+  whisper "  <bot>: play poker   --   start a new game"
+  whisper "  <bot>: help poker   --   show this help"
+  whisper "  <bot>: join poker   --   join a new game"
+  whisper "  <bot>: quit poker   --   quit the current game"
   whisper "While playing:"
-  whisper "  bet <num>            --   bet a new sum"
-  whisper "  call/fold            --   call the current bet or fold your cards"
-  whisper "  all-in               --   go all in"
-  whisper "  players              --   show all information about current players"
+  whisper "  bet <num>           --   bet a new sum"
+  whisper "  call/fold           --   call the current bet or fold your cards"
+  whisper "  all-in              --   go all in"
+  whisper "  players             --   show all information about current players"
 
 showPlayers :: MessageM ()
 showPlayers = do
   mps <- load "players"
   case mps of
        Just pls | not (nullMap pls) ->
-            say $ "Current players: " ++ intercalate ", " (elemsMap pls)
-       _ -> say "There is noone playing at the moment!"
+            say $ "Currently playing poker: " ++ intercalate ", " (elemsMap pls)
+       _ -> say "There is noone playing poker at the moment!"
 
 --------------------------------------------------------------------------------
 -- Setting up the game environment
 
 startGame :: MessageM ()
 startGame = do
-  store "state" "new game"
-  n <- getNickname
-  say $ "Poker game started. Say \"" ++ n ++ ": poker join\" to join this game."
+  state <- load "state"
+  if (state == Nothing || state == Just "ended") then do
+    answerTo $ \who ->
+      case who of
+           Left  _ -> answer "Sorry, but this game needs to be run in a public channel."
+           Right _ -> do
+             store "state" "new game"
+             n <- getNickname
+             say $ "Poker game started. Say \"" ++ n ++ ": join poker\" to join this game."
+   else do
+    answer "Poker game already in progress. You can play only one game per channel."
+
 
 acceptPlayers :: MessageM ()
 acceptPlayers = require "state" "new game" $ do

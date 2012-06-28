@@ -4,12 +4,9 @@
 
 module Hirc.Types.Instances where
 
-import Data.Maybe
 import Control.Monad.Error
 import Control.Monad.Reader
 import Data.Time
-
-import qualified Data.Set as S
 
 import Hirc.Types.Commands
 import Hirc.Types.Hirc
@@ -61,6 +58,16 @@ instance IsModuleStateValue v => IsModuleStateValue (Maybe v) where
   fromMSV (MSV_Maybe v) = Just $ fromMSV =<< v
   fromMSV _ = Nothing
 
+instance IsModuleStateValue List where
+  toMSV = MSV_List
+  fromMSV (MSV_List l) = Just l
+  fromMSV _ = Nothing
+
+instance IsModuleStateValue Map where
+  toMSV = MSV_Map
+  fromMSV (MSV_Map m) = Just m
+  fromMSV _ = Nothing
+
 instance (IsModuleStateValue v1, IsModuleStateValue v2) => IsModuleStateValue (v1, v2) where
   toMSV (v1, v2) = MSV_Tup2 (toMSV v1, toMSV v2)
   fromMSV (MSV_Tup2 (m1,m2)) = do v1 <- fromMSV m1
@@ -96,11 +103,6 @@ instance (IsModuleStateValue v1, IsModuleStateValue v2, IsModuleStateValue v3, I
     v4 <- fromMSV m4
     v5 <- fromMSV m5
     Just (v1,v2,v3,v4,v5)
-  fromMSV _ = Nothing
-
-instance IsModuleStateValue Map where
-  toMSV = MSV_Map
-  fromMSV (MSV_Map m) = Just m
   fromMSV _ = Nothing
 
 -- instance (IsModuleStateValue v) => IsModuleStateValue (M.Map String v) where
