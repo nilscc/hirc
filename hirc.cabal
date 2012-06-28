@@ -42,6 +42,7 @@ library
         Hirc.Messages
         Hirc.ModuleState
         Hirc.Utils
+        Hirc.Modules.Admin
         Hirc.Modules.Poker
         Hirc.Modules.UrlTitles
 
