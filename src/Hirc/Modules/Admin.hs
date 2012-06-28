@@ -13,12 +13,12 @@ adminModule :: AdminSettings -> Module
 adminModule settings = Module "Admin" Nothing $ do
   currentChannel <- getCurrentChannel
   onValidPrefix $ do
-    userCommand $ \"auth" pw         -> auth pw settings >> done
-    userCommand $ \"join" channel    -> requireAuth $ joinChannel channel >> done
-    userCommand $ \"part" channel    -> requireAuth $ partChannel channel >> done
-    userCommand $ \"part"            -> requireAuth $ maybe (return ()) partChannel currentChannel >> done
-    userCommand $ \"set" "nick" name -> requireAuth $ setNickname name >> done
-    userCommand $ \"help" "admin"    -> showHelp >> done
+    userCommand $ \"auth" pw         -> auth pw settings
+    userCommand $ \"join" channel    -> requireAuth $ joinChannel channel
+    userCommand $ \"part" channel    -> doneAfter $ requireAuth $ partChannel channel
+    userCommand $ \"part"            -> doneAfter $ requireAuth $ maybe (return ()) partChannel currentChannel
+    userCommand $ \"set" "nick" name -> requireAuth $ setNickname name
+    userCommand $ \"help" "admin"    -> showHelp
 
 showHelp :: MessageM ()
 showHelp = do
@@ -39,7 +39,7 @@ auth pw settings
       Just l  -> concatList uname l
     answer "You're successfully authenticated."
   | otherwise = do
-    whisper "Incorrect password."
+    answer "Incorrect password."
 
 requireAuth :: MessageM () -> MessageM ()
 requireAuth m = do
