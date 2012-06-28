@@ -5,55 +5,56 @@
 module Hirc
   ( -- requireHandle
 
-    -- * Types
-    -- ** Hirc types & functions
-    Hirc
+    -- * Hirc types & functions
+    Hirc (..)
   , newHirc
-  , HircM
-  , HircError (..)
-  , HircState (..)
-  , HircSettings (..)
+  , run
+  --, HircM
+  --, HircError (..)
+  --, HircState (..)
+  --, HircSettings (..)
 
   , getNickname
   , getUsername
   , getRealname
-  , setNickname
+  --, setNickname
 
-    -- ** Module types & functions
+    -- * Module types & functions
   , Module (..)
-  , IsModuleStateValue (..)
+  , IsModuleStateValue -- (..)
   , Map
   , module Hirc.ModuleState
 
-    -- ** Messages and user commands
+    -- * Messages & user commands
   , MessageM
-  , module Hirc.Messages
-  , module Hirc.Commands
-  , say, whisper, answerTo, answer, answer'
-  , onValidPrefix
+  , HircM
+  , IsHircCommand (..)
+  , userCommand, onValidPrefix --, onCommand
+  , done, doneAfter, getMessage, getCurrentChannel
+  , withNickname, withUsername, withNickAndUser, withServer, withParams
 
-    -- ** Managed types
-  , Managed
-  , ManagedState (..)
-  , ManagedSettings (..)
 
-    -- ** Connection types
+    -- * IRC types & functions
+  , Message (..)
   , IrcServer (..)
   , Reconnect (..)
-  , ConnectionCommand (..)
+  , stdReconnect
+  --, ConnectionCommand (..)
+  , Channel
   , Nickname
   , Username
   , Realname
-  , To
-  , module Hirc.Connection
+  , answer, say, whisper, answerTo
+  , joinChannel, partChannel, sendNotice, quitServer
 
-    -- ** Logging
+    -- * Logging
   , LogM (..)
   , LogSettings (..)
-  , module Hirc.Logging
+  , logM
 
-    -- * Reexports
+    -- * Other
   , module Hirc.Utils
+
   , module Control.Concurrent.MState
   , module Control.Monad.Reader
   , module Control.Exception.Peel
@@ -91,17 +92,12 @@ getRealname = gets ircRealname
 --------------------------------------------------------------------------------
 -- IRC stuff
 
-say :: String       -- ^ channel or persons name
-    -> String
-    -> MessageM ()
-say to str = lift . sendCmd $ PrivMsg to str
-
 -- | Reply in a query to the user of the current message
 whisper :: String -> MessageM ()
-whisper txt = withNickname $ \n -> say n txt
+whisper txt = withNickname $ \n -> sendCmd $ PrivMsg n txt
 
 answerTo :: Filtered m
-         => (Either String String -> m ())
+         => (Either Nickname Channel -> m ())
          -> MessageM ()
 answerTo m = withParams $ \[c,_] -> do
   n <- getNickname
@@ -112,7 +108,7 @@ answerTo m = withParams $ \[c,_] -> do
     -- public message to channel
     runFiltered $ m (Right c)
 
--- | Answer and add the nick for public channels
+-- | Answer and add the nick in public channels
 answer :: String
        -> MessageM ()
 answer text =
@@ -123,15 +119,32 @@ answer text =
              sendCmd $ PrivMsg c (n ++ ": " ++ text))
 
 -- | Answer without prefix the nick in a public channel
-answer' :: String
-        -> MessageM ()
-answer' text =
+say :: String
+    -> MessageM ()
+say text =
   answerTo $ \to ->
     sendCmd $ PrivMsg (either id id to) text
+
+joinChannel :: Channel -> MessageM ()
+joinChannel ch = lift $ sendCmd $ Join ch -- TODO: store current channels somewhere?
+
+partChannel :: Channel -> MessageM ()
+partChannel ch = lift $ sendCmd $ Part ch
+
+sendNotice :: Nickname -> String -> MessageM ()
+sendNotice n s = lift $ sendCmd $ Notice n s
+
+quitServer :: Maybe String -- ^ optional quit message
+           -> MessageM ()
+quitServer mqmsg = lift $ sendCmd $ Quit mqmsg
+
+
 
 --------------------------------------------------------------------------------
 -- IRC tests
 
+-- | Require prefixing user commands with the name of the bot (in a public
+-- channel)
 onValidPrefix :: MessageM ()
               -> MessageM ()
 onValidPrefix wm =
@@ -159,7 +172,7 @@ onValidPrefix wm =
 --------------------------------------------------------------------------------
 -- Default stuff
 
--- | Default Hirc state
+-- | Create a new Hirc instance
 newHirc :: IrcServer -> [Channel] -> [Module] -> Hirc
 newHirc srv chs mods = Hirc
   { server     = srv

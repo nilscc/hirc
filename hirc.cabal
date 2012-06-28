@@ -9,6 +9,43 @@ category:       Network
 build-type:     Simple
 cabal-version:  >= 1.6
 
+library
+    ghc-options: -Wall
+    hs-source-dirs: src
+    build-depends:
+        base == 4.*,
+        mtl == 2.*,
+        containers == 0.*,
+        network == 2.*,
+        curl == 1.*,
+        time == 1.*,
+        directory == 1.*,
+        irc == 0.*,
+        mstate == 0.*,
+        monad-peel == 0.*,
+        regex-posix == 0.*,
+        tagsoup == 0.*,
+        utf8-string == 0.*
+    exposed-modules:
+        Hirc
+        Hirc.Modules
+    other-modules:
+        Hirc.Connection.Managed
+        Hirc.Types
+        Hirc.Types.Commands
+        Hirc.Types.Connection
+        Hirc.Types.Hirc
+        Hirc.Types.Instances
+        Hirc.Commands
+        Hirc.Connection
+        Hirc.Logging
+        Hirc.Messages
+        Hirc.ModuleState
+        Hirc.Utils
+        Hirc.Modules.Poker
+        Hirc.Modules.UrlTitles
+
+
 executable hirc
     hs-source-dirs: src
     main-is: Main.hs

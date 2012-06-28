@@ -1,7 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 
-module Modules.Poker
+module Hirc.Modules.Poker
   ( poker
   ) where
 
@@ -61,8 +61,8 @@ showPlayers = do
   mps <- load "players"
   case mps of
        Just pls | not (nullMap pls) ->
-            answer' $ "Current players: " ++ intercalate ", " (elemsMap pls)
-       _ -> answer' "There is noone playing at the moment!"
+            say $ "Current players: " ++ intercalate ", " (elemsMap pls)
+       _ -> say "There is noone playing at the moment!"
 
 --------------------------------------------------------------------------------
 -- Setting up the game environment
@@ -71,7 +71,7 @@ startGame :: MessageM ()
 startGame = do
   store "state" "new game"
   n <- getNickname
-  answer' $ "Poker game started. Say \"" ++ n ++ ": poker join\" to join this game."
+  say $ "Poker game started. Say \"" ++ n ++ ": poker join\" to join this game."
 
 acceptPlayers :: MessageM ()
 acceptPlayers = require "state" "new game" $ do
@@ -85,7 +85,7 @@ acceptPlayers = require "state" "new game" $ do
          case ms of
               Nothing -> singletonMap u n
               Just m  -> insertMap u n m
-       answer' $ "Player \"" ++ n ++ "\" joins the game."
+       say $ "Player \"" ++ n ++ "\" joins the game."
 
 quitGame :: MessageM ()
 quitGame = withNickAndUser $ \n u -> do
@@ -93,4 +93,4 @@ quitGame = withNickAndUser $ \n u -> do
     case mm of
          Just m  -> deleteMap u m
          Nothing -> emptyMap
-  answer' $ "\"" ++ n ++ "\" left the game!"
+  say $ "\"" ++ n ++ "\" left the game!"

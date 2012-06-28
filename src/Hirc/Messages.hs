@@ -60,6 +60,7 @@ onCommand c m = do
   c' <- fmap IRC.msg_command getMessage
   when (c == c') (runFiltered m)
 
+-- | All current message parameters, see `Message'
 withParams :: Filtered m
            => ([String] -> m ())
            -> MessageM ()
@@ -68,21 +69,21 @@ withParams m = do
   catchPatternException $ runFiltered (m ps)
 
 withNickname :: Filtered m
-             => (String -> m ())
+             => (Nickname -> m ())
              -> MessageM ()
 withNickname m = catchPatternException $ do
   Just (NickName n _ _) <- fmap IRC.msg_prefix getMessage
   runFiltered (m n)
 
 withUsername :: Filtered m
-             => (String -> m ())
+             => (Username -> m ())
              -> MessageM ()
 withUsername m = catchPatternException $ do
   Just (NickName _ (Just u) _) <- fmap IRC.msg_prefix getMessage
   runFiltered (m u)
 
 withNickAndUser :: Filtered m
-                => (String -> String -> m ())
+                => (Nickname -> Username -> m ())
                 -> MessageM ()
 withNickAndUser m =
   withNickname $ \n ->

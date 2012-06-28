@@ -1,7 +1,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 
-module Modules.UrlTitles
+module Hirc.Modules.UrlTitles
     ( urlTitles
     ) where
 
@@ -28,7 +28,7 @@ urlTitles = Module "UrlTitles" Nothing $ do
          (url:_) -> do
            title <- getTitle url
            maybe (return ())
-                 (answer' . ("Title: " ++))
+                 (say . ("Title: " ++))
                  title
          _ -> return ()
 

@@ -56,6 +56,11 @@ instance IsModuleStateValue UTCTime where
   fromMSV (MSV_Time t) = Just t
   fromMSV _ = Nothing
 
+instance IsModuleStateValue v => IsModuleStateValue (Maybe v) where
+  toMSV = MSV_Maybe . fmap toMSV
+  fromMSV (MSV_Maybe v) = Just $ fromMSV =<< v
+  fromMSV _ = Nothing
+
 instance (IsModuleStateValue v1, IsModuleStateValue v2) => IsModuleStateValue (v1, v2) where
   toMSV (v1, v2) = MSV_Tup2 (toMSV v1, toMSV v2)
   fromMSV (MSV_Tup2 (m1,m2)) = do v1 <- fromMSV m1
@@ -103,10 +108,10 @@ instance IsModuleStateValue Map where
   -- fromMSV (MSV_Map m) = Just $ M.mapMaybe fromMSV m
   -- fromMSV _ = Nothing
 
-instance (IsModuleStateValue v, Ord v) => IsModuleStateValue (S.Set v) where
-  toMSV = MSV_Set . S.map toMSV
-  fromMSV (MSV_Set s) = Just $ S.map fromJust $ S.delete Nothing $ S.map fromMSV s
-  fromMSV _ = Nothing
+--instance (IsModuleStateValue v, Ord v) => IsModuleStateValue (S.Set v) where
+  --toMSV = MSV_Set . S.map toMSV
+  --fromMSV (MSV_Set s) = Just $ S.map fromJust $ S.delete Nothing $ S.map fromMSV s
+  --fromMSV _ = Nothing
 
 
 --------------------------------------------------------------------------------

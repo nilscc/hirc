@@ -24,12 +24,10 @@ type Nickname = String
 type Username = String
 type Realname = String
 
-type To = Nickname
-
 data ConnectionCommand
   = Send Message
-  | PrivMsg To String  -- ^ private message
-  | Notice To String
+  | PrivMsg Nickname String  -- ^ private message
+  | Notice Nickname String
   | Join Channel
   | Part Channel
   | Ping

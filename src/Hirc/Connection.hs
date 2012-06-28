@@ -124,7 +124,7 @@ receiveCommand = forever . requireHandle $ \h -> do
 mkMessage :: String -> [Parameter] -> Message
 mkMessage cmd params = Message Nothing cmd params
 
-notice :: To -> String -> Message
+notice :: Nickname -> String -> Message
 notice t s = mkMessage "NOTICE" [t,s]
 
 -- Listen on handle and put incoming messages to our Chan

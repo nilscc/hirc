@@ -4,7 +4,7 @@ module Hirc.ModuleState
   , updateAll
   , (~>)
 
-    -- *** map functions
+    -- ** Map functions
   , emptyMap, insertMap, alterMap, lookupMap, singletonMap, memberMap
   , mapWithKeyMap, adjustMap, deleteMap, elemsMap, keysMap, nullMap
   ) where
@@ -22,6 +22,8 @@ import Hirc.Logging
 --------------------------------------------------------------------------------
 -- Global state functions
 
+-- | Store a module state value in the global context (i.e. all channels share
+-- the same state)
 storeGlobal :: IsModuleStateValue a => String -> a -> MessageM ()
 storeGlobal k v = do
   mn <- requireModuleName
@@ -30,6 +32,7 @@ storeGlobal k v = do
                                mn
                                (moduleState hs) }
 
+-- | Load a module state value from the global context
 loadGlobal :: IsModuleStateValue a => String -> MessageM (Maybe a)
 loadGlobal k = do
   mn <- requireModuleName
@@ -37,11 +40,14 @@ loadGlobal k = do
  where
   onJust = (=<<)
 
+-- | Update a module state value in the global context
 updateGlobal :: IsModuleStateValue v => String -> (Maybe v -> v) -> MessageM ()
 updateGlobal k f = do
   v <- loadGlobal k
   storeGlobal k (f v)
 
+-- | Require a module state value. The action @m ()@ is only run when the value
+-- @v@ matches the actual value in the state at key @k@.
 requireGlobal :: (IsModuleStateValue a, Filtered m) => String -> a -> m () -> MessageM ()
 requireGlobal k v m = do
   realv <- loadGlobal k
@@ -51,6 +57,8 @@ requireGlobal k v m = do
 --------------------------------------------------------------------------------
 -- Channel specific state functions
 
+-- | Store a module state value in the current channel context (i.e. each
+-- channel has it's own state)
 store :: IsModuleStateValue v => String -> v -> MessageM ()
 store k v = do
   chan <- fmap (fromMaybe "__private__") getCurrentChannel
@@ -61,16 +69,21 @@ store k v = do
   storeChKV (Just m) = Just $ insertMap k v m
   storeChKV Nothing  = Just $ singletonMap k v
 
+-- | Load a module state value from the current channel context
 load :: IsModuleStateValue v => String -> MessageM (Maybe v)
 load k = do
   mchan <- getCurrentChannel
   loadGlobal "__channels__" ~> fromMaybe "__private__" mchan ~> k
 
+-- | Update a module state value in the current channel context
 update :: IsModuleStateValue v => String -> (Maybe v -> v) -> MessageM ()
 update k f = do
   v <- load k
   store k (f v)
 
+-- | Require a module state value in the current channel context. The action @m
+-- ()@ is only run when the value @v@ matches the actual value in the state at
+-- key @k@.
 require :: (IsModuleStateValue v, Filtered m) => String -> v -> m () -> MessageM ()
 require k v m = do
   realv <- load k
@@ -99,6 +112,9 @@ requireModuleName = do
   mn <- getModuleName
   maybe (logM 2 "`requireModuleName': No module name!" >> mzero) return mn
 
+-- | Combinator to easily access nested `Map's in a module state, e.g.
+--
+-- > playername <- loadGloabl "__channels__" ~> channelname ~> "players" ~> "name"
 (~>) :: IsModuleStateValue a => MessageM (Maybe Map) -> String -> MessageM (Maybe a)
 loadCmd ~> k = do
   mres <- loadCmd

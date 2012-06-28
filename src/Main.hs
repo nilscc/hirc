@@ -1,7 +1,7 @@
 module Main where
 
 import Hirc
-import Modules
+import Hirc.Modules
 
 main :: IO ()
 main = run

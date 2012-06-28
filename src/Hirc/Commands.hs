@@ -15,6 +15,27 @@ import Hirc.Messages
 --------------------------------------------------------------------------------
 -- Running
 
+-- | Handle user commands. This can be done by pattern matching (pattern
+-- matching exceptions are caught such that this can be done safely), e.g.:
+--
+-- > userCommand $ \"translate" lang1 lang2 (unwords -> text) -> do
+-- >   ...
+--
+-- Here @\"translate\"@ is matched with the actual word \"translate\", @lang1@
+-- and @lang2@ are the two words following after @\"translate\"@ and the
+-- @-XViewPattern@ extension @(unwords -> text)@ applies the function @unwords@
+-- to all remaining words of this user command. For example:
+--
+-- > translate en de this bot is so cool
+--
+-- turns into
+--
+-- > lang1 = "en"
+-- > lang2 = "de"
+-- > text  = "this bot is so cool"
+--
+-- If \"translate\" doesn't match the first word (or the rest of the pattern
+-- doesn't match), the whole user command is ignored.
 userCommand :: IsHircCommand cmd
             => cmd
             -> MessageM ()

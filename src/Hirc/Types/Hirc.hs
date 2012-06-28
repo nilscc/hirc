@@ -78,18 +78,23 @@ class MonadPeelIO m => Filtered m where
 
 type ModuleName = String
 
--- | Modules use the Message monad
+-- | Modules use the `MessageM' monad and can `store' and `load' values from the
+-- module state. Each module has its own state that cannot be accessed by other
+-- modules.
 data Module = Module
-  { moduleName    :: ModuleName
-  , onNickChange  :: Maybe (UserName -> NickName -> MessageM ())
+  { moduleName    :: ModuleName                                   -- ^ (Unique) module name. This should be the same as the Haskell filename of the module.
+  , onNickChange  :: Maybe (Username -> Nickname -> MessageM ())  -- ^ Optional function to be run whenever a user changes his nickname.
+                                                                  -- @Nickname@ is the new nickname whereas @Username@ should stay the same.
   , runModule     :: MessageM ()
   }
 
+-- | Any value stored
 data ModuleStateValue
   = MSV_String  String
   | MSV_Int     Integer
   | MSV_Bool    Bool
   | MSV_Time    UTCTime
+  | MSV_Maybe   (Maybe ModuleStateValue)
   | MSV_Tup2    (ModuleStateValue, ModuleStateValue)
   | MSV_Tup3    (ModuleStateValue, ModuleStateValue, ModuleStateValue)
   | MSV_Tup4    (ModuleStateValue, ModuleStateValue, ModuleStateValue, ModuleStateValue)
@@ -98,6 +103,9 @@ data ModuleStateValue
   | MSV_Map     Map
   deriving (Eq, Ord, Show)
 
+-- | The `Map' type is a weakly typed @String => ModuleStateValue@ map. Type
+-- interference will convert `ModuleStateValue's to the corresponding basic
+-- Haskell type (if possible) when using the `Map'-functions listed below.
 newtype Map = Map { unMSV_Map :: M.Map String ModuleStateValue }
   deriving (Eq, Ord, Show)
 
