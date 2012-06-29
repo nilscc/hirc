@@ -25,7 +25,8 @@ library
         monad-peel == 0.*,
         regex-posix == 0.*,
         tagsoup == 0.*,
-        utf8-string == 0.*
+        utf8-string == 0.*,
+        random == 1.*
     exposed-modules:
         Hirc
         Hirc.Modules
@@ -63,7 +64,8 @@ executable hirc
         monad-peel == 0.*,
         regex-posix == 0.*,
         tagsoup == 0.*,
-        utf8-string == 0.*
+        utf8-string == 0.*,
+        random == 1.*
 
 
 
