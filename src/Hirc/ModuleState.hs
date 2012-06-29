@@ -1,6 +1,6 @@
 module Hirc.ModuleState
-  ( store, load, update, require
-  , loadGlobal, storeGlobal, updateGlobal, requireGlobal
+  ( store, load, update, delete, require
+  , loadGlobal, storeGlobal, updateGlobal, deleteGlobal, requireGlobal
   , updateAll
   , (~>)
 
@@ -10,9 +10,9 @@ module Hirc.ModuleState
   , reverseList, mapList, elemList
 
     -- ** Map functions
-  , emptyMap, insertMap, alterMap, lookupMap
+  , toListMap, fromListMap, emptyMap, insertMap, alterMap, lookupMap
   , singletonMap, memberMap, mapWithKeyMap, adjustMap, deleteMap
-  , elemsMap, keysMap, nullMap
+  , elemsMap, keysMap, nullMap, sizeMap
   ) where
 
 import Data.Maybe
@@ -52,6 +52,14 @@ updateGlobal k f = do
   v <- loadGlobal k
   storeGlobal k (f v)
 
+deleteGlobal :: String -> MessageM ()
+deleteGlobal k = do
+  mn <- requireModuleName
+  modify $ \hs -> hs { moduleState = M.alter f mn (moduleState hs) }
+ where
+  f (Just m) = Just $ M.delete k m
+  f Nothing  = Nothing
+
 -- | Require a module state value. The action @m ()@ is only run when the value
 -- @v@ matches the actual value in the state at key @k@.
 requireGlobal :: (IsModuleStateValue a, Filtered m) => String -> a -> m () -> MessageM ()
@@ -86,6 +94,16 @@ update :: IsModuleStateValue v => String -> (Maybe v -> v) -> MessageM ()
 update k f = do
   v <- load k
   store k (f v)
+
+delete :: String -> MessageM ()
+delete k = do
+  chan <- fmap (fromMaybe "__private__") getCurrentChannel
+  updateGlobal "__channels__" $ \mm -> case mm of
+    Just m  -> alterMap storeChKV chan m
+    Nothing -> emptyMap
+ where
+  storeChKV (Just m) = Just $ deleteMap k m
+  storeChKV Nothing  = Nothing
 
 -- | Require a module state value in the current channel context. The action @m
 -- ()@ is only run when the value @v@ matches the actual value in the state at
@@ -190,6 +208,12 @@ elemList v (List l) = toMSV v `elem` l
 emptyMap :: Map
 emptyMap = Map M.empty
 
+toListMap :: IsModuleStateValue v => Map -> [(String, Maybe v)]
+toListMap (Map m) = map (\(k,v) -> (k,fromMSV v)) (M.toList m)
+
+fromListMap :: IsModuleStateValue v => [(String, v)] -> Map
+fromListMap l = Map (M.fromList (map (\(k,v) -> (k,toMSV v)) l))
+
 insertMap :: IsModuleStateValue v => String -> v -> Map -> Map
 insertMap k v (Map m) = Map (M.insert k (toMSV v) m)
 
@@ -222,3 +246,6 @@ keysMap (Map m) = M.keys m
 
 nullMap :: Map -> Bool
 nullMap (Map m) = M.null m
+
+sizeMap :: Map -> Int
+sizeMap (Map m) = M.size m
