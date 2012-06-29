@@ -14,12 +14,12 @@ adminModule :: AdminSettings -> Module
 adminModule settings = Module "Admin" Nothing $ do
   currentChannel <- getCurrentChannel
   onValidPrefix $ do
-    userCommand $ \"auth" pw         -> auth pw settings
-    userCommand $ \"join" channel    -> requireAuth settings $ joinChannel channel
-    userCommand $ \"part" channel    -> doneAfter $ requireAuth settings $ partChannel channel
-    userCommand $ \"part"            -> doneAfter $ requireAuth settings $ maybe (return ()) partChannel currentChannel
-    userCommand $ \"set" "nick" name -> requireAuth settings $ changeNickname name
-    userCommand $ \"help" "admin"    -> showHelp
+    userCommand $ \"admin" "auth" pw         -> auth pw settings
+    userCommand $ \"admin" "join" channel    -> requireAuth settings $ joinChannel channel
+    userCommand $ \"admin" "part" channel    -> doneAfter $ requireAuth settings $ partChannel channel
+    userCommand $ \"admin" "part"            -> doneAfter $ requireAuth settings $ maybe (return ()) partChannel currentChannel
+    userCommand $ \"admin" "set" "nick" name -> requireAuth settings $ changeNickname name
+    userCommand $ \"admin" "help" "admin"    -> showHelp
 
 showHelp :: MessageM ()
 showHelp = do
