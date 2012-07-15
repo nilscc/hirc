@@ -1,14 +1,13 @@
-{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, TypeSynonymInstances #-}
+{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, TypeSynonymInstances,
+             MultiParamTypeClasses, GADTs #-}
 
 module Hirc.Types.Commands where
 
-import Hirc.Types.Hirc
-
-data HircCommand
+data HircCommand m
   = HC_Nothing
-  | HC_Run          (MessageM    HircCommand)
-  | HC_Lam          (String   -> HircCommand)
-  | HC_Lams         ([String] -> HircCommand)
+  | HC_Run          (m (HircCommand m))
+  | HC_Lam          (String   -> HircCommand m)
+  | HC_Lams         ([String] -> HircCommand m)
 
-class IsHircCommand a where
-  toCmd :: a -> HircCommand
+class IsHircCommand m a where
+  toCmd :: a -> HircCommand m

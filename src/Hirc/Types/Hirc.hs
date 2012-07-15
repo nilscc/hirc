@@ -17,6 +17,7 @@ import Hirc.Types.Connection
 
 type NickName = String
 
+
 --------------------------------------------------------------------------------
 -- The Hirc monad
 
@@ -30,6 +31,11 @@ data Hirc = Hirc
   }
 
 type HircM = MState HircState (ReaderT HircSettings (ErrorT HircError IO))
+
+class (LogM m, MonadPeelIO m, Functor m) => ContainsHirc m where
+  askHircSettings :: m HircSettings
+  getHircState    :: m HircState
+  modifyHircState :: (HircState -> HircState) -> m ()
 
 type EventLoop = HircM ()
 
@@ -59,13 +65,15 @@ data HircState = HircState
   , runningModules  :: [Module]
   }
 
+
 --------------------------------------------------------------------------------
 -- Message filter monad
 
 type MessageM = ReaderT Message HircM
 
-class MonadPeelIO m => Filtered m where
-  runFiltered :: m a -> MessageM a
+class ContainsHirc m => ContainsMessage m where
+  getMessage :: m Message
+  localMessage :: (Message -> Message) -> m a -> m a
 
 
 --------------------------------------------------------------------------------
@@ -86,8 +94,11 @@ class IsModule m where
     -- ^ Optional function to be run whenever a user changes his nickname.
     -- @Nickname@ is the new nickname whereas @Username@ should stay the same.
 
-  initModule         :: m -> HircM ()
+  initModule         :: m -> HircM (ModuleState m)
+    -- ^ initiate the state
+
   runModule          :: m -> ModuleM m ()
+
 
 --------------------------------------------------------------------------------
 -- The Managed monad
@@ -114,3 +125,10 @@ data LogSettings = LogSettings
   , logPrintLevel :: Int
   , logFile       :: FilePath
   }
+
+
+--------------------------------------------------------------------------------
+-- X runs in Y
+
+class (Monad m, Monad f) => CanRun m f where
+  runInside :: f a -> m a

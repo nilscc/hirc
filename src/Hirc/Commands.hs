@@ -4,7 +4,6 @@ module Hirc.Commands
   ( userCommand
   ) where
 
-import Control.Monad.Reader
 import Network.IRC
 
 import Hirc.Types
@@ -35,20 +34,20 @@ import Hirc.Messages
 --
 -- If \"translate\" doesn't match the first word (or the rest of the pattern
 -- doesn't match), the whole user command is ignored.
-userCommand :: IsHircCommand cmd
+userCommand :: (ContainsMessage m, IsHircCommand m cmd)
             => cmd
-            -> MessageM ()
+            -> m ()
 userCommand cmd = onCommand "PRIVMSG" $ withParams $ \[_,text] ->
   runC (words text) (toCmd cmd)
 
-runC :: [String] -> HircCommand -> MessageM ()
+runC :: (ContainsMessage m) => [String] -> HircCommand m -> m ()
 runC wrds cmd = case cmd of
 
   HC_Nothing   -> return ()
   HC_Run h     -> h >>= runC wrds
   HC_Lam f     -> 
     case wrds of
-         (w:ws) -> local dropWord $ catchPatternException $
+         (w:ws) -> localMessage dropWord $ catchPatternException $
                      runC ws (f w)
          []     -> return ()
   HC_Lams f    -> catchPatternException $

@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE PatternGuards, TemplateHaskell, TypeFamilies, DeriveDataTypeable #-}
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 
 module Hirc.Modules.Admin

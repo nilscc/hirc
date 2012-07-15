@@ -41,7 +41,6 @@ library
         Hirc.Connection
         Hirc.Logging
         Hirc.Messages
-        Hirc.ModuleState
         Hirc.Utils
         Hirc.Modules.Admin
         Hirc.Modules.Poker

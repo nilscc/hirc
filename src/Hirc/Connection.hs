@@ -82,9 +82,9 @@ connect nick' user' rn = do
 
 -- Sending/receiving commands/messages
 
-sendCmd :: ConnectionCommand -> HircM ()
+sendCmd :: ContainsHirc m => ConnectionCommand -> m ()
 sendCmd c = do
-  cmd <- asks cmdChan
+  cmd <- askHircSettings >>= return . cmdChan
   liftIO $ writeChan cmd c
 
 getMsg :: HircM Message

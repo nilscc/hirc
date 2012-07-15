@@ -6,8 +6,7 @@ module Hirc
   ( -- requireHandle
 
     -- * Hirc types & functions
-    Hirc (..)
-  , newHirc
+    Hirc (..), newHirc
   , run
   --, HircM
   --, HircError (..)
@@ -17,7 +16,8 @@ module Hirc
   , getNickname, getUsername, getRealname, changeNickname
 
     -- * Module types & functions
-  , Module (..)
+  , Module, newModule
+  , ModuleM, IsModule (..)
 
     -- * Messages & user commands
   , MessageM
@@ -62,6 +62,7 @@ import Prelude                      hiding (catch)
 
 import Control.Concurrent
 import Control.Concurrent.MState
+import Control.Monad.IO.Peel
 import Control.Monad.Error
 import Control.Monad.Reader
 import Control.Exception.Peel
@@ -93,16 +94,25 @@ run :: MonadIO m => [Hirc] -> m ()
 run hircs = do
   runManaged $ mapM_ (manage defEventLoop) hircs
 
+
+--------------------------------------------------------------------------------
+-- Modules
+
+-- | Create an uninitialized module. Make sure to define `initModule'!
+newModule :: IsModule m => m -> Module
+newModule m = Module m undefined
+
+
 --------------------------------------------------------------------------------
 -- IRC stuff
 
 -- | Reply in a query to the user of the current message
-whisper :: String -> MessageM ()
+whisper :: ContainsMessage m => String -> m ()
 whisper txt = withNickname $ \n -> sendCmd $ PrivMsg n txt
 
-reply :: Filtered m
+reply :: ContainsMessage m
       => (Either Nickname Channel -> m ())
-      -> MessageM ()
+      -> m ()
 reply m = withParams $ \[c,_] -> do
   n <- getNickname
   if c == n then
@@ -110,40 +120,38 @@ reply m = withParams $ \[c,_] -> do
     withNickname $ m . Left
    else
     -- public message to channel
-    runFiltered $ m (Right c)
+    m (Right c)
 
 -- | Answer and add the nick in public channels
-answer :: String
-       -> MessageM ()
+answer :: ContainsMessage m => String -> m ()
 answer text =
   reply $
-    either (\n -> lift $
+    either (\n ->
              sendCmd $ PrivMsg n text)
            (\c -> withNickname $ \n ->
              sendCmd $ PrivMsg c (n ++ ": " ++ text))
 
 -- | Answer without prefix the nick in a public channel
-say :: String
-    -> MessageM ()
+say :: ContainsMessage m => String -> m ()
 say text =
   reply $ \to ->
     sendCmd $ PrivMsg (either id id to) text
 
-sayIn :: Channel -> String -> MessageM ()
-sayIn c text = lift $ sendCmd $ PrivMsg c text
+sayIn :: ContainsMessage m => Channel -> String -> m ()
+sayIn c text = sendCmd $ PrivMsg c text
 
-joinChannel :: Channel -> MessageM ()
-joinChannel ch = lift $ sendCmd $ Join ch -- TODO: store current channels somewhere?
+joinChannel :: ContainsMessage m => Channel -> m ()
+joinChannel ch = sendCmd $ Join ch -- TODO: store current channels somewhere?
 
-partChannel :: Channel -> MessageM ()
-partChannel ch = lift $ sendCmd $ Part ch
+partChannel :: ContainsMessage m => Channel -> m ()
+partChannel ch = sendCmd $ Part ch
 
-sendNotice :: Nickname -> String -> MessageM ()
-sendNotice n s = lift $ sendCmd $ Notice n s
+sendNotice :: ContainsMessage m => Nickname -> String -> m ()
+sendNotice n s = sendCmd $ Notice n s
 
-quitServer :: Maybe String -- ^ optional quit message
-           -> MessageM ()
-quitServer mqmsg = lift $ sendCmd $ Quit mqmsg
+quitServer :: ContainsMessage m => Maybe String -- ^ optional quit message
+           -> m ()
+quitServer mqmsg = sendCmd $ Quit mqmsg
 
 
 
@@ -152,8 +160,7 @@ quitServer mqmsg = lift $ sendCmd $ Quit mqmsg
 
 -- | Require prefixing user commands with the name of the bot (in a public
 -- channel)
-onValidPrefix :: MessageM ()
-              -> MessageM ()
+onValidPrefix :: (IsHircCommand m (m ()), ContainsMessage m) => m () -> m ()
 onValidPrefix wm =
   onCommand "PRIVMSG" $ withParams $ \[c,_] -> do
     myNick <- getNickname
@@ -181,13 +188,13 @@ onValidPrefix wm =
 -- Handling incoming messages
 
 -- irc commands: join
-joinCmd :: String -> HircM ()
+joinCmd :: ContainsHirc m => String -> m ()
 joinCmd chan = do
   logM 1 $ "Joining: \"" ++ chan ++ "\""
   sendCmd $ Join chan
 
 -- irc commands: pong
-pongCmd :: HircM ()
+pongCmd :: ContainsHirc m => m ()
 pongCmd = do
   logM 4 "PING? PONG!"
   sendCmd Pong
@@ -198,7 +205,7 @@ isCTCP s = not (null s)
         && head s == '\001' 
         && last s == '\001'
 
-handleCTCP :: String -> MessageM ()
+handleCTCP :: ContainsMessage m => String -> m ()
 
 handleCTCP "\001VERSION\001" =
   withNickname $ \to -> do
@@ -208,21 +215,21 @@ handleCTCP "\001VERSION\001" =
 handleCTCP t =
   logM 2 $ "Unhandled CTCP: " ++ t
 
-changeNickname :: Nickname -> MessageM ()
-changeNickname n = lift $ sendCmd $ Nick n
+changeNickname :: ContainsHirc m => Nickname -> m ()
+changeNickname n = sendCmd $ Nick n
 
-setNickname :: String -> MessageM ()
-setNickname n = lift $ modifyM_ $ \s -> s { ircNickname = n }
+setNickname :: ContainsHirc m => String -> m ()
+setNickname n = modifyHircState $ \s -> s { ircNickname = n }
 
-getNickname :: MessageM String
-getNickname = gets ircNickname
+getNickname :: ContainsHirc m => m String
+getNickname = getHircState >>= return . ircNickname
 
 -- | Get current username. If there is a leading '~' it is discarded.
-getUsername :: MessageM String
-getUsername = dropWhile (== '~') `fmap` gets ircUsername
+getUsername :: ContainsHirc m => m String
+getUsername = getHircState >>= return . dropWhile (== '~') . ircUsername
 
-getRealname :: MessageM String
-getRealname = gets ircRealname
+getRealname :: ContainsHirc m => m String
+getRealname = getHircState >>= return . ircRealname
 
 -- | Default event loop
 defEventLoop :: HircM ()
@@ -241,6 +248,8 @@ defEventLoop = do
   chs <- asks $ channels . runningHirc
   mapM_ joinCmd chs
 
+  -- init modules
+  onMods initMod
 
   let logIOException (e :: IOException) = do
         logM 1 $ "IO exception: " ++ show e
@@ -248,6 +257,7 @@ defEventLoop = do
       logSTMException (e :: BlockedIndefinitelyOnSTM) = do
         logM 1 $ "Blocked indefinitely on STM transaction: " ++ show e
         throwError H_ConnectionLost
+
   handle logSTMException . handle logIOException . forever . handleIncomingMessage $ do
 
     onCommand "PING" $
@@ -281,14 +291,18 @@ defEventLoop = do
     -- run user modules
     onMods runMod
  where
-  onMods :: (Module -> MessageM Module) -> MessageM ()
-  onMods f = lift (asks $ modules . runningHirc)
+  onMods :: ContainsHirc m
+         => (Module -> m Module)
+         -> m ()
+  onMods f = fmap (modules . runningHirc) askHircSettings
          >>= mapM (\m -> f m `catch` moduleException m)
          >>= setMods
 
   setMods mods' = 
-    lift $ modifyM_ $ \hs -> hs { runningModules = mods' }
+    modifyHircState $ \hs -> hs { runningModules = mods' }
 
+  initMod (Module mm _) =
+    Module mm `fmap` initModule mm
   runMod (Module mm s) =
     Module mm `fmap` execMState (runModule mm) s
   onNick u new (Module mm s) =
@@ -298,7 +312,7 @@ defEventLoop = do
 --------------------------------------------------------------------------------
 -- Exceptions
 
-moduleException :: Module -> SomeException -> MessageM Module
+moduleException :: (LogM m, MonadPeelIO m) => Module -> SomeException -> m Module
 moduleException m@(Module mm _) e = do
   logM 1 $ "Module exception in \"" ++ moduleName mm ++ "\": " ++ show e
   return m

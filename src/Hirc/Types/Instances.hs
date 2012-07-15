@@ -1,11 +1,13 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses,
-             UndecidableInstances #-}
+             UndecidableInstances, TypeFamilies #-}
 {-# OPTIONS -fno-warn-orphans #-}
 
 module Hirc.Types.Instances where
 
+import Control.Concurrent.MState
 import Control.Monad.Error
 import Control.Monad.Reader
+import Control.Monad.Trans.Peel
 
 import Hirc.Types.Commands
 import Hirc.Types.Hirc
@@ -18,11 +20,55 @@ instance Error HircError where
 --------------------------------------------------------------------------------
 -- Filter monad instances
 
-instance Filtered HircM where
-  runFiltered = lift
+instance ContainsHirc HircM where
+  askHircSettings = ask
+  getHircState    = get
+  modifyHircState = modifyM_
 
-instance Filtered MessageM where
-  runFiltered = id
+instance ContainsHirc MessageM where
+  askHircSettings = lift ask
+  getHircState    = lift get
+  modifyHircState = lift . modifyM_
+
+instance ContainsHirc (MState s MessageM) where
+  askHircSettings = lift askHircSettings
+  getHircState    = lift getHircState
+  modifyHircState = lift . modifyHircState
+
+instance ContainsMessage MessageM where
+  getMessage = ask
+  localMessage = local
+
+instance ContainsMessage (MState s MessageM) where
+  getMessage = lift ask
+  localMessage f s = do
+    k <- peel
+    join $ lift $ local f (k s)
+
+
+--------------------------------------------------------------------------------
+-- X runs in Y
+
+instance CanRun HircM HircM where
+  runInside = id
+instance CanRun HircM IO where
+  runInside = liftIO
+
+instance CanRun MessageM MessageM where
+  runInside = id
+instance CanRun MessageM HircM where
+  runInside = lift
+instance CanRun MessageM IO where
+  runInside = lift . runInside
+
+instance CanRun (MState s MessageM) (MState s MessageM) where
+  runInside = id
+instance CanRun (MState s MessageM) MessageM where
+  runInside = lift
+instance CanRun (MState s MessageM) HircM where
+  runInside = lift . runInside
+instance CanRun (MState s MessageM) IO where
+  runInside = lift . runInside
 
 
 --------------------------------------------------------------------------------
@@ -30,27 +76,43 @@ instance Filtered MessageM where
 
 -- Basic type instances
 
-instance IsHircCommand () where
-  toCmd _ = HC_Nothing
+instance IsHircCommand m () where
+  toCmd _    = HC_Nothing
 
 -- functions
 
-instance IsHircCommand a => IsHircCommand (String -> a) where
-  toCmd f    = HC_Lam     (\s  -> toCmd (f s))
-
-instance IsHircCommand a => IsHircCommand ([String] -> a) where
-  toCmd f    = HC_Lams    (\ws -> toCmd (f ws))
+instance IsHircCommand m a => IsHircCommand m (String -> a) where
+  toCmd f    = HC_Lam  (\s  -> toCmd (f s))
+instance IsHircCommand m a => IsHircCommand m ([String] -> a) where
+  toCmd f    = HC_Lams (\ws -> toCmd (f ws))
 
 -- monads
 
-instance IsHircCommand a => IsHircCommand (MessageM a) where
-  toCmd wm   = HC_Run     (fmap toCmd wm)
+type ModM s = MState s MessageM
 
-instance IsHircCommand a => IsHircCommand (HircM a) where
-  toCmd hirc = HC_Run     (fmap toCmd $ lift $ hirc)
+--instance (CanRun m m, IsHircCommand m a) => IsHircCommand m (m a) where
+  --toCmd m    = HC_Run $ m >>= return . toCmd
 
-instance IsHircCommand a => IsHircCommand (IO a) where
-  toCmd io   = HC_Run     (fmap toCmd $ liftIO io)
+instance IsHircCommand (ModM s) a => IsHircCommand (ModM s) (ModM s a) where
+  toCmd modm = mkHcRun modm
+instance (CanRun (ModM s) MessageM, IsHircCommand (ModM s) a) => IsHircCommand (ModM s) (MessageM a) where
+  toCmd msgm = mkHcRunInside msgm
+
+instance IsHircCommand MessageM a => IsHircCommand MessageM (MessageM a) where
+  toCmd msgm = mkHcRun msgm
+instance (CanRun MessageM HircM, IsHircCommand MessageM a) => IsHircCommand MessageM (HircM a) where
+  toCmd hrcm = mkHcRunInside hrcm
+
+instance IsHircCommand HircM a => IsHircCommand HircM (HircM a) where
+  toCmd hrcm = mkHcRun hrcm
+instance (CanRun HircM IO, IsHircCommand HircM a) => IsHircCommand HircM (IO a) where
+  toCmd iom  = mkHcRunInside iom
+
+mkHcRun :: (Monad m, IsHircCommand m a) => m a -> HircCommand m
+mkHcRun f = HC_Run $ f >>= return . toCmd
+
+mkHcRunInside :: (IsHircCommand m a, CanRun m f) => f a -> HircCommand m
+mkHcRunInside f = HC_Run $ runInside $ f >>= return . toCmd
 
 
 --------------------------------------------------------------------------------
@@ -67,3 +129,7 @@ instance LogM HircM where
 instance LogM Managed where
   logChan     = asks logChanM
   logSettings = asks logSettingsM
+
+instance LogM (MState s MessageM) where
+  logChan     = lift logChan
+  logSettings = lift logSettings

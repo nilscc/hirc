@@ -6,7 +6,6 @@
 module Hirc.Messages where
 
 import Prelude hiding (catch)
-import Control.Concurrent.MState
 import Control.Monad
 import Control.Monad.Error
 import Control.Monad.Reader
@@ -29,76 +28,72 @@ handleIncomingMessage m = do
 done :: MonadPlus m => m ()
 done = mzero
 
-doneAfter :: (MonadPlus m, Filtered m) => m () -> MessageM ()
-doneAfter m = runFiltered m >> done
+doneAfter :: (MonadPlus m) => m () -> m ()
+doneAfter m = m >> done
 
 
 --------------------------------------------------------------------------------
 -- Filter
 
-getMessage :: MessageM Message
-getMessage = ask
-
-getCurrentChannel :: MessageM (Maybe String)
+getCurrentChannel :: ContainsMessage m => m (Maybe String)
 getCurrentChannel = do
   msg <- getMessage
   let cmd    = IRC.msg_command msg
       (ch:_) = IRC.msg_params msg
-  me  <- gets ircNickname
+  me  <- ircNickname `fmap` getHircState
   return $
     if cmd == "PRIVMSG" && ch /= me then
        Just ch
      else
        Nothing
 
-onCommand :: Filtered m
+onCommand :: (ContainsMessage m)
           => String
           -> m ()
-          -> MessageM ()
+          -> m ()
 onCommand c m = do
-  c' <- fmap IRC.msg_command getMessage
-  when (c == c') (runFiltered m)
+  c' <- IRC.msg_command `fmap` getMessage
+  when (c == c') (m)
 
 -- | All current message parameters, see `Message'
-withParams :: Filtered m
+withParams :: (ContainsMessage m)
            => ([String] -> m ())
-           -> MessageM ()
+           -> m ()
 withParams m = do
   ps <- fmap IRC.msg_params getMessage
-  catchPatternException $ runFiltered (m ps)
+  catchPatternException $ (m ps)
 
-withNickname :: Filtered m
+withNickname :: (ContainsMessage m)
              => (Nickname -> m ())
-             -> MessageM ()
+             -> m ()
 withNickname m = catchPatternException $ do
   Just (NickName n _ _) <- fmap IRC.msg_prefix getMessage
-  runFiltered (m n)
+  (m n)
 
 -- | Get the username of the current message. If there is a leading '~' it is
 -- discarded.
-withUsername :: Filtered m
+withUsername :: (ContainsMessage m)
              => (Username -> m ())
-             -> MessageM ()
+             -> m ()
 withUsername m = catchPatternException $ do
   Just (NickName _ (Just u) _) <- fmap IRC.msg_prefix getMessage
-  runFiltered (m $ dropWhile (== '~') u)
+  (m $ dropWhile (== '~') u)
 
-withNickAndUser :: Filtered m
+withNickAndUser :: (ContainsMessage m)
                 => (Nickname -> Username -> m ())
-                -> MessageM ()
-withNickAndUser m =
-  withNickname $ \n ->
-  withUsername $ \u ->
-    m n u
+                -> m ()
+withNickAndUser m = do
+  Just (NickName n (Just u) _) <- fmap IRC.msg_prefix getMessage
+  m n (dropWhile (== '~') u)
 
-withServer :: Filtered m
+withServer :: (ContainsMessage m)
            => (String -> m ())
-           -> MessageM ()
+           -> m ()
 withServer m = catchPatternException $ do
   Just p <- fmap IRC.msg_prefix getMessage
   case p of
-       Server n              -> runFiltered (m n)
-       NickName _ _ (Just n) -> runFiltered (m n)
+       Server n              -> (m n)
+       NickName _ _ (Just n) -> (m n)
        _                     -> return ()
 
 --------------------------------------------------------------------------------
