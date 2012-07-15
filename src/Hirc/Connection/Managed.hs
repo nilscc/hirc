@@ -12,12 +12,10 @@ import Control.Concurrent
 import Control.Concurrent.MState
 import Control.Monad.Error
 import Control.Monad.Reader
--- import Data.Time
-import qualified Data.Map as M
 
 import Hirc.Types
 import Hirc.Logging
--- import Utils
+
 
 --------------------------------------------------------------------------------
 -- | Run managed sessions
@@ -40,7 +38,13 @@ runHircM :: MonadIO m => HircSettings -> HircM a -> m (Either HircError a)
 runHircM s r = liftIO $ runErrorT (runReaderT (evalMState True (setState >> r) defState) s)
   where
     defState :: HircState
-    defState = HircState Nothing "" "" "" M.empty
+    defState = HircState
+      { connectedHandle = Nothing
+      , ircNickname     = ""
+      , ircUsername     = ""
+      , ircRealname     = ""
+      , runningModules  = []
+      }
     setState :: HircM ()
     setState = do
       h <- asks runningHirc

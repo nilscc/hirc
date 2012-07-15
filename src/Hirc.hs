@@ -18,10 +18,6 @@ module Hirc
 
     -- * Module types & functions
   , Module (..)
-  , IsModuleStateValue -- (..)
-  , List
-  , Map
-  , module Hirc.ModuleState
 
     -- * Messages & user commands
   , MessageM
@@ -64,7 +60,6 @@ module Hirc
 
 import Prelude                      hiding (catch)
 
-import Control.Arrow
 import Control.Concurrent
 import Control.Concurrent.MState
 import Control.Monad.Error
@@ -75,7 +70,6 @@ import Text.Regex.Posix
 import Hirc.Commands
 import Hirc.Connection
 import Hirc.Messages
-import Hirc.ModuleState
 import Hirc.Logging
 import Hirc.Types
 import Hirc.Utils
@@ -223,7 +217,7 @@ setNickname n = lift $ modifyM_ $ \s -> s { ircNickname = n }
 getNickname :: MessageM String
 getNickname = gets ircNickname
 
--- | Get current hostname. If there is a leading '~' it is discarded.
+-- | Get current username. If there is a leading '~' it is discarded.
 getUsername :: MessageM String
 getUsername = dropWhile (== '~') `fmap` gets ircUsername
 
@@ -256,9 +250,6 @@ defEventLoop = do
         throwError H_ConnectionLost
   handle logSTMException . handle logIOException . forever . handleIncomingMessage $ do
 
-    -- load modules
-    mods <- lift . asks $ modules . runningHirc
-
     onCommand "PING" $
       pongCmd
 
@@ -273,8 +264,7 @@ defEventLoop = do
            logM 1 $ "Nick changed to \"" ++ new ++ "\""
          else
            -- call `onNickChange' if existant
-           mapM_ (\m -> withModCtxt m (maybe (return ()) (\f -> f u new) (onNickChange m)) `catch` moduleException m)
-                 mods
+           onMods (onNick u new)
 
     onCommand "INVITE" $
       withParams $ \[_,chan] -> joinCmd chan
@@ -289,18 +279,29 @@ defEventLoop = do
           done
 
     -- run user modules
-    mapM_ (\m -> withModCtxt m (runModule m) `catch` moduleException m)
-          mods
+    onMods runMod
  where
-  withModCtxt m f = local (second $ \ctxt -> ctxt { ctxtModule = Just m }) f
+  onMods :: (Module -> MessageM Module) -> MessageM ()
+  onMods f = lift (asks $ modules . runningHirc)
+         >>= mapM (\m -> f m `catch` moduleException m)
+         >>= setMods
+
+  setMods mods' = 
+    lift $ modifyM_ $ \hs -> hs { runningModules = mods' }
+
+  runMod (Module mm s) =
+    Module mm `fmap` execMState (runModule mm) s
+  onNick u new (Module mm s) =
+    Module mm `fmap` execMState (maybe (return ()) (\f -> f u new) (onNickChange mm)) s
 
 
 --------------------------------------------------------------------------------
 -- Exceptions
 
-moduleException :: Module -> SomeException -> MessageM ()
-moduleException Module{ moduleName } e =
-  logM 1 $ "Module exception in \"" ++ moduleName ++ "\": " ++ show e
+moduleException :: Module -> SomeException -> MessageM Module
+moduleException m@(Module mm _) e = do
+  logM 1 $ "Module exception in \"" ++ moduleName mm ++ "\": " ++ show e
+  return m
 
 
 --------------------------------------------------------------------------------

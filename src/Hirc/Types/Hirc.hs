@@ -1,8 +1,8 @@
-{-# LANGUAGE TypeSynonymInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE TypeSynonymInstances, MultiParamTypeClasses, RankNTypes,
+             TypeFamilies, GADTs #-}
 
 module Hirc.Types.Hirc where
 
-import Data.Time
 import Control.Concurrent.Chan
 import Control.Concurrent.MVar
 import Control.Concurrent.MState
@@ -11,9 +11,6 @@ import Control.Monad.Reader
 import Control.Monad.Error
 import Network.IRC
 import System.IO
-
-import qualified Data.Map as M
-import qualified Data.Set as S
 
 import Hirc.Types.Connection
 
@@ -40,6 +37,8 @@ data HircError
   = H_NotConnected
   | H_ConnectionLost
   | H_ConnectionFailed
+  | H_NicknameAlreadyInUse NickName
+  | H_UsernameAlreadyInUse Username
   | H_Other String
   deriving (Show, Eq)
 
@@ -57,17 +56,13 @@ data HircState = HircState
   , ircNickname     :: String
   , ircUsername     :: String
   , ircRealname     :: String
-  , moduleState     :: M.Map ModuleName ModuleState
+  , runningModules  :: [Module]
   }
 
 --------------------------------------------------------------------------------
 -- Message filter monad
 
-type MessageM = ReaderT (Message, Context) HircM
-
-data Context = Context
-  { ctxtModule :: Maybe Module
-  }
+type MessageM = ReaderT Message HircM
 
 class MonadPeelIO m => Filtered m where
   runFiltered :: m a -> MessageM a
@@ -76,50 +71,23 @@ class MonadPeelIO m => Filtered m where
 --------------------------------------------------------------------------------
 -- Modules
 
-type ModuleName = String
+data Module where
+  Module :: IsModule m => m -> ModuleState m -> Module
 
--- | Modules use the `MessageM' monad and can `store' and `load' values from the
--- module state. Each module has its own state that cannot be accessed by other
--- modules.
-data Module = Module
-  { moduleName    :: ModuleName                                   -- ^ (Unique) module name. This should be the same as the Haskell filename of the module.
-  , onNickChange  :: Maybe (Username -> Nickname -> MessageM ())  -- ^ Optional function to be run whenever a user changes his nickname.
-                                                                  -- @Nickname@ is the new nickname whereas @Username@ should stay the same.
-  , runModule     :: MessageM ()
-  }
+type ModuleM m a = MState (ModuleState m) MessageM a
 
--- | Any value stored
-data ModuleStateValue
-  = MSV_String  String
-  | MSV_Int     Integer
-  | MSV_Bool    Bool
-  | MSV_Time    UTCTime
-  | MSV_List    List
-  | MSV_Map     Map
-  | MSV_Maybe   (Maybe ModuleStateValue)
-  | MSV_Tup2    (ModuleStateValue, ModuleStateValue)
-  | MSV_Tup3    (ModuleStateValue, ModuleStateValue, ModuleStateValue)
-  | MSV_Tup4    (ModuleStateValue, ModuleStateValue, ModuleStateValue, ModuleStateValue)
-  | MSV_Tup5    (ModuleStateValue, ModuleStateValue, ModuleStateValue, ModuleStateValue, ModuleStateValue)
-  | MSV_Set     (S.Set ModuleStateValue)
-  deriving (Eq, Ord, Show)
+class IsModule m where
+  type ModuleState m :: *
 
--- | The `Map' type is a weakly typed @String => ModuleStateValue@ map. Type
--- interference will convert `ModuleStateValue's to the corresponding basic
--- Haskell type (if possible) when using the `Map'-functions listed below.
-newtype Map = Map { unMSV_Map :: M.Map String ModuleStateValue }
-  deriving (Eq, Ord, Show)
+  moduleName         :: m -> String
+    -- ^ (Unique) module name. This should be the same as the Haskell filename of the module.
 
--- | Weakly typed @ModuleStateValue@ list. Similar behaviour to `Map'.
-newtype List = List { unLSV_List :: [ModuleStateValue] }
-  deriving (Eq, Ord, Show)
+  onNickChange       :: m -> Maybe (Username -> Nickname -> ModuleM m ())
+    -- ^ Optional function to be run whenever a user changes his nickname.
+    -- @Nickname@ is the new nickname whereas @Username@ should stay the same.
 
-type ModuleState = M.Map String ModuleStateValue
-
-class Eq a => IsModuleStateValue a where
-  toMSV   :: a -> ModuleStateValue
-  fromMSV :: ModuleStateValue -> Maybe a
-
+  initModule         :: m -> HircM ()
+  runModule          :: m -> ModuleM m ()
 
 --------------------------------------------------------------------------------
 -- The Managed monad

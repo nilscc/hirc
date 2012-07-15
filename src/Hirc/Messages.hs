@@ -21,11 +21,10 @@ import Hirc.Types
 handleIncomingMessage :: MessageM () -> HircM ()
 handleIncomingMessage m = do
   msg <- getMsg
-  runReaderT (m `catchError` noMsgErr) (msg, nullCtxt)
+  runReaderT (m `catchError` noMsgErr) msg
  where
   noMsgErr e | e == noMsg = return ()
              | otherwise  = throwError e
-  nullCtxt = Context { ctxtModule = Nothing }
 
 done :: MonadPlus m => m ()
 done = mzero
@@ -38,7 +37,7 @@ doneAfter m = runFiltered m >> done
 -- Filter
 
 getMessage :: MessageM Message
-getMessage = fmap fst ask
+getMessage = ask
 
 getCurrentChannel :: MessageM (Maybe String)
 getCurrentChannel = do

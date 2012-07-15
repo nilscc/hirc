@@ -4,7 +4,6 @@ module Hirc.Commands
   ( userCommand
   ) where
 
-import Control.Arrow
 import Control.Monad.Reader
 import Network.IRC
 
@@ -49,7 +48,7 @@ runC wrds cmd = case cmd of
   HC_Run h     -> h >>= runC wrds
   HC_Lam f     -> 
     case wrds of
-         (w:ws) -> local (first dropWord) $ catchPatternException $
+         (w:ws) -> local dropWord $ catchPatternException $
                      runC ws (f w)
          []     -> return ()
   HC_Lams f    -> catchPatternException $
