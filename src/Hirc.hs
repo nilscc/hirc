@@ -27,7 +27,7 @@ module Hirc
   , MessageM
   , HircM
   , IsHircCommand (..)
-  , userCommand, onValidPrefix --, onCommand
+  , userCommand, onValidPrefix, onCommand
   , done, doneAfter, getMessage, getCurrentChannel
   , withNickname, withUsername, withNickAndUser, withServer, withParams
 
@@ -41,7 +41,7 @@ module Hirc
   , Nickname
   , Username
   , Realname
-  , answer, say, whisper, answerTo
+  , answer, say, whisper, sayIn
   , joinChannel, partChannel, sendNotice, quitServer
 
     -- * Concurrency
@@ -102,10 +102,10 @@ getRealname = gets ircRealname
 whisper :: String -> MessageM ()
 whisper txt = withNickname $ \n -> sendCmd $ PrivMsg n txt
 
-answerTo :: Filtered m
-         => (Either Nickname Channel -> m ())
-         -> MessageM ()
-answerTo m = withParams $ \[c,_] -> do
+reply :: Filtered m
+      => (Either Nickname Channel -> m ())
+      -> MessageM ()
+reply m = withParams $ \[c,_] -> do
   n <- getNickname
   if c == n then
     -- private message to user
@@ -118,7 +118,7 @@ answerTo m = withParams $ \[c,_] -> do
 answer :: String
        -> MessageM ()
 answer text =
-  answerTo $
+  reply $
     either (\n -> lift $
              sendCmd $ PrivMsg n text)
            (\c -> withNickname $ \n ->
@@ -128,8 +128,11 @@ answer text =
 say :: String
     -> MessageM ()
 say text =
-  answerTo $ \to ->
+  reply $ \to ->
     sendCmd $ PrivMsg (either id id to) text
+
+sayIn :: Channel -> String -> MessageM ()
+sayIn c text = lift $ sendCmd $ PrivMsg c text
 
 joinChannel :: Channel -> MessageM ()
 joinChannel ch = lift $ sendCmd $ Join ch -- TODO: store current channels somewhere?
@@ -154,7 +157,7 @@ quitServer mqmsg = lift $ sendCmd $ Quit mqmsg
 onValidPrefix :: MessageM ()
               -> MessageM ()
 onValidPrefix wm =
-  withParams $ \[c,_] -> do
+  onCommand "PRIVMSG" $ withParams $ \[c,_] -> do
     myNick <- getNickname
     if c == myNick then
       -- direct query
@@ -257,9 +260,9 @@ defEventQueue = do
             logM 1 $ "CTCP exception: " ++ show e
           done
 
-      -- run user modules
-      mapM_ (\m -> withModCtxt m (runModule m) `catch` moduleException m)
-            mods
+    -- run user modules
+    mapM_ (\m -> withModCtxt m (runModule m) `catch` moduleException m)
+          mods
  where
   withModCtxt m f = local (second $ \ctxt -> ctxt { ctxtModule = Just m }) f
 

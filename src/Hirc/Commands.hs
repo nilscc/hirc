@@ -39,7 +39,7 @@ import Hirc.Messages
 userCommand :: IsHircCommand cmd
             => cmd
             -> MessageM ()
-userCommand cmd = withParams $ \[_,text] ->
+userCommand cmd = onCommand "PRIVMSG" $ withParams $ \[_,text] ->
   runC (words text) (toCmd cmd)
 
 runC :: [String] -> HircCommand -> MessageM ()

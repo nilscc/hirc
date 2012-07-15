@@ -40,9 +40,13 @@ pokerModule = Module "Poker" (Just updatePlayers) $ do
 
   onValidPrefix $ do
 
-    userCommand $ \"poker" "help" -> showHelp
-    userCommand $ \"poker" "join" -> acceptPlayers
-    userCommand $ \"poker" "quit" -> quitGame
+    userCommand $ \"poker" "help"  -> showHelp
+
+    userCommand $ \"poker" "join"  -> acceptPlayers
+    userCommand $ \"poker" "start" -> acceptPlayers
+
+    userCommand $ \"poker" "quit"  -> quitGame
+    userCommand $ \"poker" "leave" -> quitGame
 
   userCommand $ \"players"        -> showPlayers        >> done
   userCommand $ \"pl"             -> showPlayers        >> done
@@ -66,8 +70,10 @@ pokerModule = Module "Poker" (Just updatePlayers) $ do
   userCommand $ \"check"          -> check              >> done
   userCommand $ \"call"           -> call               >> done
   userCommand $ \"raise" amount   -> raise amount       >> done
+  userCommand $ \"bet"   amount   -> raise amount       >> done
   --userCommand $ \"fold" "now"     -> fold'              >> done
   userCommand $ \"fold"           -> fold               >> done
+  userCommand $ \"all" "in"       -> allIn              >> done
 
 -- On nickchange: update player names
 updatePlayers :: Username -> Nickname -> MessageM ()
@@ -113,16 +119,20 @@ updatePlayers un nn = do
 -- Help
 showHelp :: MessageM ()
 showHelp = do
-  whisper "Available commands:"
-  whisper "  <bot>: poker join   --   join a new game"
-  whisper "  <bot>: poker help   --   show this help"
-  whisper "  <bot>: poker quit   --   quit the current game"
+  whisper "Playing Texas Hold'em, available commands are:"
+  whisper "    <bot>: poker help         --   show this help"
+  whisper "    <bot>: poker join/start   --   join a new game"
+  whisper "    <bot>: poker leave/quit   --   leave the current game"
+  whisper "    mo[ney]                   --   show your current wealth"
+  whisper "    pl[ayers]                 --   show who is playing in the next game"
+  whisper "    deal [cards]              --   deal cards, start a new game"
   whisper "While playing:"
-  whisper "  bet <num>           --   bet a new sum (at least big blind or the amount of the last raise)"
-  whisper "  call/fold           --   call the current bet or fold your cards"
-  whisper "  all-in              --   go all in"
-  whisper "  players             --   show all information about current players"
-  whisper "  new round           --   start a new round"
+  whisper "    raise/bet <num>           --   bet a new sum (at least big blind or the amount of the last raise)"
+  whisper "    check/call/fold           --   check, call the current bet or fold your cards"
+  whisper "    all in                    --   go all in"
+  whisper "    or[der]                   --   show current order"
+  whisper "    ca[rds]                   --   show your own and all community cards"
+  whisper "    tu[rn]                    --   show whose turn it currently is"
 
 showPlayers :: MessageM ()
 showPlayers = do
@@ -201,9 +211,16 @@ getAmountToCall u = do
 showCurrentOrder :: MessageM ()
 showCurrentOrder = do
   mo <- getCurrentOrder
+  mfp <- load "first position"
+  let formatNames (n,u,w,p) =
+        (if Just u == mfp then "*" else "")  -- first player indication
+        ++ n  -- nick
+        ++ " (" ++ show p ++ "/" ++ show w ++ ")"  -- (current pot/total wealth)
+
   case mo of
-       Just nicks -> say $ "Currently playing: " ++ intercalate ", " (map (\(n,_,w,p) -> n ++ " (" ++ show p ++ "/" ++ show w ++ ")") nicks)
+       Just nicks -> say $ "Currently playing: " ++ intercalate ", " (map formatNames nicks)
        Nothing    -> say "Cannot figure out current order – sorry!"
+ where
 
 showCurrentPlayer :: MessageM ()
 showCurrentPlayer = do
@@ -352,6 +369,8 @@ deal = do
           store "state" "preflop"
           payBlinds
           nextPlayer
+          Just (_,cp) <- getCurrentPlayer
+          store "round started by" cp
           showCurrentPlayer
         _ -> say "Cannot start a game of poker with less than 2 players."
 
@@ -383,13 +402,17 @@ dealCards ps = do
 payBlinds :: MessageM ()
 payBlinds = require "state" "preflop" $ do
   Just (n,u) <- getCurrentPlayer
+  -- store "firs" position
+  store "first position" u
+  -- pay small blind
   bet u smallBlind
   say $ n ++ " pays " ++ show smallBlind ++ " (small blind)."
+  -- pay big blind
   nextPlayer
   Just (n',u') <- getCurrentPlayer
   bet u' bigBlind
   say $ n' ++ " pays " ++ show bigBlind ++ " (big blind)."
-  store "last raise" (u', bigBlind)
+  store "last raise" ((Nothing :: Maybe Username), bigBlind)
 
 bet :: Username -> Money -> MessageM ()
 bet u m = do
@@ -442,11 +465,11 @@ raise (readsafe -> Just r) = requireCurrentPlayer $
     tc <- getAmountToCall u
     let tot = tc + r
     mx <- fromMaybe 0 `fmap` getPotMax
-    lr <- maybe 0 (snd :: (Username, Integer) -> Integer) `fmap` load "last raise"
+    lr <- maybe 0 (snd :: (Maybe Username, Integer) -> Integer) `fmap` load "last raise"
     if pw >= tot && r >= lr then do
        say $ n ++ " raises the pot by " ++ show r ++ " to a total of " ++ show (mx+r) ++ "."
        bet u tot
-       store "last raise" (u,r)
+       store "last raise" (Just u,r)
        nextPlayer
        showCurrentPlayer
      else if r < lr then
@@ -468,6 +491,9 @@ fold' = do
     update "order" $
       maybe emptyMap (deleteMap u)
     showCurrentPlayer
+
+allIn :: MessageM ()
+allIn = undefined
 
 endGame :: MessageM ()
 endGame = do
@@ -518,8 +544,11 @@ nextPlayer = do
                 appendList (tailList l) (singletonList f)
            _ -> emptyList -- shouldn't happen anyway
      mc  <- getCurrentPlayer
-     mlr <- load "last raise" :: MessageM (Maybe (Username, Money))
-     when (fmap fst mlr == fmap snd mc) nextPhase
+     mlr <- load "last raise" :: MessageM (Maybe (Maybe Username, Money))
+     mgs <- load "round started by"
+     let playerIsLastRaise    = fmap fst mlr == Just (fmap snd mc)
+         playerHasStartedGame = Nothing == join (fmap fst mlr) && mgs == fmap snd mc
+     when (playerIsLastRaise || playerHasStartedGame) nextPhase
 
 nextPhase :: MessageM ()
 nextPhase = do
@@ -543,6 +572,17 @@ takeCard = do
   update "cards" $ maybe emptyList tailList
   return c
 
+-- start round with first position player
+startFromFirstPosition :: MessageM ()
+startFromFirstPosition = do
+  Just (fp :: Username) <- load "first position"
+  store "round started by" fp
+  let skip = do Just (_,cp) <- getCurrentPlayer
+                unless (cp == fp) (nextPlayer >> skip)
+  skip
+  update "last raise" $ \(Just (_,lr)) ->
+    ((Nothing :: Maybe Username), (lr :: Integer))
+
 flop :: MessageM ()
 flop = require "state" "preflop" $ do
   say "First betting round ends."
@@ -554,6 +594,7 @@ flop = require "state" "preflop" $ do
   let fcs = map show [c1,c2,c3]
   store "flop" $ Just (toList fcs)
   showCommunityCards
+  startFromFirstPosition
 
 turn :: MessageM ()
 turn = require "state" "flop" $ do
@@ -566,6 +607,7 @@ turn = require "state" "flop" $ do
   store "turn" $ (Just tcs)
   -- show cards
   showCommunityCards
+  startFromFirstPosition
 
 river :: MessageM ()
 river = require "state" "turn" $ do
@@ -578,10 +620,12 @@ river = require "state" "turn" $ do
   store "river" $ (Just rcs)
   -- show cards
   showCommunityCards
+  startFromFirstPosition
 
 showdown :: MessageM ()
 showdown = require "state" "river" $ do
   say "Showdown!"
+  startFromFirstPosition
   endGame
 
 --------------------------------------------------------------------------------

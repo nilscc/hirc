@@ -22,7 +22,7 @@ import Hirc
 
 urlTitlesModule :: Module
 urlTitlesModule = Module "UrlTitles" Nothing $ do
-  withParams $ \[_,text] -> do
+  onCommand "PRIVMSG" $ withParams $ \[_,text] -> do
     let urls = filter (=~ "^(http://|https://|www\\.)") (words text)
     case urls of
          (url:_) -> do
