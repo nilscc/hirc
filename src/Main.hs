@@ -7,8 +7,8 @@ import Hirc.Modules.H3st
 
 main :: IO ()
 main = run
-  --[ newHirc xinutec  ["##hirc"]  defaultModules
-  [ newHirc freenode ["##norsk"] defaultModules
+  [ newHirc xinutec  ["##hirc"]  defaultModules
+  -- [ newHirc freenode ["##norsk"] defaultModules
   ]
 
 xinutec, freenode :: IrcServer

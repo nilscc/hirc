@@ -80,21 +80,24 @@ import Hirc.Logging
 import Hirc.Types
 import Hirc.Utils
 
-changeNickname :: Nickname -> MessageM ()
-changeNickname n = lift $ sendCmd $ Nick n
+--------------------------------------------------------------------------------
+-- Hirc instances
 
-setNickname :: String -> MessageM ()
-setNickname n = lift $ modifyM_ $ \s -> s { ircNickname = n }
+-- | Create a new Hirc instance
+newHirc :: IrcServer -> [Channel] -> [Module] -> Hirc
+newHirc srv chs mods = Hirc
+  { server        = srv
+  , channels      = chs
+  , nickname      = "hirc"
+  , username      = "hirc"
+  , realname      = "hirc"
+  , modules       = mods
+  }
 
-getNickname :: MessageM String
-getNickname = gets ircNickname
-
--- | Get current hostname. If there is a leading '~' it is discarded.
-getUsername :: MessageM String
-getUsername = dropWhile (== '~') `fmap` gets ircUsername
-
-getRealname :: MessageM String
-getRealname = gets ircRealname
+-- | Run Hirc instances
+run :: MonadIO m => [Hirc] -> m ()
+run hircs = do
+  runManaged $ mapM_ (manage defEventLoop) hircs
 
 --------------------------------------------------------------------------------
 -- IRC stuff
@@ -179,20 +182,9 @@ onValidPrefix wm =
   esc '}'  r = "\\}" ++ r
   esc a    r = a:r
 
---------------------------------------------------------------------------------
--- Default stuff
 
--- | Create a new Hirc instance
-newHirc :: IrcServer -> [Channel] -> [Module] -> Hirc
-newHirc srv chs mods = Hirc
-  { server     = srv
-  , channels   = chs
-  , nickname   = "hirc"
-  , username   = "hirc"
-  , realname   = "hirc"
-  , eventQueue = defEventQueue
-  , modules    = mods
-  }
+--------------------------------------------------------------------------------
+-- Handling incoming messages
 
 -- irc commands: join
 joinCmd :: String -> HircM ()
@@ -206,9 +198,41 @@ pongCmd = do
   logM 4 "PING? PONG!"
   sendCmd Pong
 
--- | Default event queue
-defEventQueue :: HircM ()
-defEventQueue = do
+-- CTCP stuff
+isCTCP :: String -> Bool
+isCTCP s = not (null s)
+        && head s == '\001' 
+        && last s == '\001'
+
+handleCTCP :: String -> MessageM ()
+
+handleCTCP "\001VERSION\001" =
+  withNickname $ \to -> do
+    logM 2 $ "Sending CTCP VERSION reply to \"" ++ to ++ "\""
+    sendCmd $ Notice to "\001VERSION hirc v0.2\001"
+
+handleCTCP t =
+  logM 2 $ "Unhandled CTCP: " ++ t
+
+changeNickname :: Nickname -> MessageM ()
+changeNickname n = lift $ sendCmd $ Nick n
+
+setNickname :: String -> MessageM ()
+setNickname n = lift $ modifyM_ $ \s -> s { ircNickname = n }
+
+getNickname :: MessageM String
+getNickname = gets ircNickname
+
+-- | Get current hostname. If there is a leading '~' it is discarded.
+getUsername :: MessageM String
+getUsername = dropWhile (== '~') `fmap` gets ircUsername
+
+getRealname :: MessageM String
+getRealname = gets ircRealname
+
+-- | Default event loop
+defEventLoop :: HircM ()
+defEventLoop = do
 
   nn <- gets ircNickname
   un <- gets ircUsername
@@ -270,31 +294,13 @@ defEventQueue = do
  where
   withModCtxt m f = local (second $ \ctxt -> ctxt { ctxtModule = Just m }) f
 
+
 --------------------------------------------------------------------------------
 -- Exceptions
 
 moduleException :: Module -> SomeException -> MessageM ()
 moduleException Module{ moduleName } e =
   logM 1 $ "Module exception in \"" ++ moduleName ++ "\": " ++ show e
-
-
---------------------------------------------------------------------------------
--- CTCP
-
-isCTCP :: String -> Bool
-isCTCP s = not (null s)
-        && head s == '\001' 
-        && last s == '\001'
-
-handleCTCP :: String -> MessageM ()
-
-handleCTCP "\001VERSION\001" =
-  withNickname $ \to -> do
-    logM 2 $ "Sending CTCP VERSION reply to \"" ++ to ++ "\""
-    sendCmd $ Notice to "\001VERSION hirc v0.2\001"
-
-handleCTCP t =
-  logM 2 $ "Unhandled CTCP: " ++ t
 
 
 --------------------------------------------------------------------------------

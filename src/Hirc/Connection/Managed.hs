@@ -4,8 +4,8 @@ module Hirc.Connection.Managed
   (
 
     -- * Running managed connections
-    run
-  , manage
+    manage
+  , runManaged
   ) where
 
 import Control.Concurrent
@@ -18,10 +18,6 @@ import qualified Data.Map as M
 import Hirc.Types
 import Hirc.Logging
 -- import Utils
-
-run :: MonadIO m => [Hirc] -> m ()
-run hircs = do
-  runManaged $ mapM_ manage hircs
 
 --------------------------------------------------------------------------------
 -- | Run managed sessions
@@ -63,9 +59,10 @@ runHircWithSettings settings hirc = do
 
 
 -- | Start and manage new connections
-manage :: Hirc
+manage :: EventLoop
+       -> Hirc
        -> Managed ()
-manage hirc = do
+manage eventLoop hirc = do
   cmd <- liftIO newChan
   msg <- liftIO newChan
   err <- liftIO newEmptyMVar
@@ -80,7 +77,7 @@ manage hirc = do
         , logSettingsH = debugHircSettings srv
         }
   forkM $
-    runHircWithSettings settings (startLogging >> eventQueue hirc)
+    runHircWithSettings settings (startLogging >> eventLoop)
   logM 1 $ "Managing new server: " ++ host srv ++ ":" ++ show (port srv)
 
 --------------------------------------------------------------------------------

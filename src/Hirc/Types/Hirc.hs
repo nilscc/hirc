@@ -29,11 +29,12 @@ data Hirc = Hirc
   , nickname      :: String
   , username      :: String
   , realname      :: String
-  , eventQueue    :: HircM ()
   , modules       :: [Module]
   }
 
 type HircM = MState HircState (ReaderT HircSettings (ErrorT HircError IO))
+
+type EventLoop = HircM ()
 
 data HircError
   = H_NotConnected
@@ -58,7 +59,6 @@ data HircState = HircState
   , ircRealname     :: String
   , moduleState     :: M.Map ModuleName ModuleState
   }
-
 
 --------------------------------------------------------------------------------
 -- Message filter monad
