@@ -67,6 +67,7 @@ import Prelude                      hiding (catch)
 import Control.Arrow
 import Control.Concurrent
 import Control.Concurrent.MState
+import Control.Monad.Error
 import Control.Monad.Reader
 import Control.Exception.Peel
 import Text.Regex.Posix
@@ -223,10 +224,13 @@ defEventQueue = do
   mapM_ joinCmd chs
 
 
-  let logException (e :: IOException) = do
+  let logIOException (e :: IOException) = do
         logM 1 $ "IO exception: " ++ show e
-        sendCmd $ Quit Nothing
-  handle logException . forever . handleIncomingMessage $ do
+        throwError H_ConnectionLost
+      logSTMException (e :: BlockedIndefinitelyOnSTM) = do
+        logM 1 $ "Blocked indefinitely on STM transaction: " ++ show e
+        throwError H_ConnectionLost
+  handle logSTMException . handle logIOException . forever . handleIncomingMessage $ do
 
     -- load modules
     mods <- lift . asks $ modules . runningHirc
