@@ -7,7 +7,7 @@ maintainer:     Nils Schweinsberg <mail@n-sch.de>
 category:       Network
 
 build-type:     Simple
-cabal-version:  >= 1.6
+cabal-version:  >= 1.8
 
 library
     ghc-options: -Wall
@@ -26,11 +26,13 @@ library
         regex-posix == 0.*,
         tagsoup == 0.*,
         utf8-string == 0.*,
-        random == 1.*
+        random == 1.*,
+        safecopy == 0.*,
+        acid-state == 0.*
     exposed-modules:
         Hirc
-        Hirc.Modules
     other-modules:
+        Hirc.Acid
         Hirc.Connection.Managed
         Hirc.Types
         Hirc.Types.Commands
@@ -42,12 +44,10 @@ library
         Hirc.Logging
         Hirc.Messages
         Hirc.Utils
-        Hirc.Modules.Admin
-        Hirc.Modules.UrlTitles
 
 
 executable hirc
-    hs-source-dirs: src
+    hs-source-dirs: app
     main-is: Main.hs
     build-depends:
         base == 4.*,
