@@ -34,6 +34,11 @@ import Hirc.Messages
 --
 -- If \"translate\" doesn't match the first word (or the rest of the pattern
 -- doesn't match), the whole user command is ignored.
+--
+-- To avoid @incomplete pattern@ warnings in GHC, add the following line to
+-- the top of your module files:
+--
+-- > {-# OPTIONS -fno-warn-incomplete-patterns #-}
 userCommand :: (ContainsMessage m, IsHircCommand m cmd)
             => cmd
             -> m ()
