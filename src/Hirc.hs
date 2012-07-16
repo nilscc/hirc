@@ -1,6 +1,8 @@
 {-# LANGUAGE ViewPatterns, ScopedTypeVariables, NamedFieldPuns #-}
 {-# OPTIONS -fno-warn-incomplete-patterns
-            -fno-warn-missing-fields #-}
+            -fno-warn-missing-fields
+            -fno-warn-unused-do-bind
+            #-}
 
 module Hirc
   ( -- requireHandle
@@ -18,6 +20,9 @@ module Hirc
     -- * Module types & functions
   , Module, newModule
   , ModuleM, IsModule (..)
+
+    -- ** Module acid states
+  , module Hirc.Acid
 
     -- * Messages & user commands
   , MessageM
@@ -68,6 +73,7 @@ import Control.Monad.Reader
 import Control.Exception.Peel
 import Text.Regex.Posix
 
+import Hirc.Acid
 import Hirc.Commands
 import Hirc.Connection
 import Hirc.Messages
@@ -89,10 +95,19 @@ newHirc srv chs mods = Hirc
   , modules       = mods
   }
 
--- | Run Hirc instances
-run :: MonadIO m => [Hirc] -> m ()
+-- | Run Hirc instances. Needs to be run in the main thread to make sure all
+-- modules get shut down correctly!   Otherwise: TODO
+run :: MonadPeelIO m => [Hirc] -> m ()
 run hircs = do
-  runManaged $ mapM_ (manage defEventLoop) hircs
+  ct <- liftIO newChan
+
+  let async UserInterrupt = do
+        tids <- liftIO $ getChanContents ct
+        mapM_ (liftIO . (throwTo `flip` UserInterrupt)) tids
+      async e = throw e
+
+  handle async $ do
+    runManaged ct $ mapM_ (manage defEventLoop) hircs
 
 
 --------------------------------------------------------------------------------
@@ -249,6 +264,9 @@ defEventLoop = do
   mapM_ joinCmd chs
 
   -- init modules
+  mods <- asks $ modules . runningHirc
+  modifyHircState $ \hs ->
+    hs { runningModules = mods }
   onMods initMod
 
   let logIOException (e :: IOException) = do
@@ -258,7 +276,10 @@ defEventLoop = do
         logM 1 $ "Blocked indefinitely on STM transaction: " ++ show e
         throwError H_ConnectionLost
 
-  handle logSTMException . handle logIOException . forever . handleIncomingMessage $ do
+      handleAll = handle logSTMException
+                . handle logIOException
+
+  handleAll . forever . handleIncomingMessage $ do
 
     onCommand "PING" $
       pongCmd
@@ -294,7 +315,7 @@ defEventLoop = do
   onMods :: ContainsHirc m
          => (Module -> m Module)
          -> m ()
-  onMods f = fmap (modules . runningHirc) askHircSettings
+  onMods f = fmap runningModules getHircState
          >>= mapM (\m -> f m `catch` moduleException m)
          >>= setMods
 
@@ -316,7 +337,6 @@ moduleException :: (LogM m, MonadPeelIO m) => Module -> SomeException -> m Modul
 moduleException m@(Module mm _) e = do
   logM 1 $ "Module exception in \"" ++ moduleName mm ++ "\": " ++ show e
   return m
-
 
 --------------------------------------------------------------------------------
 -- Concurrency

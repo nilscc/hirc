@@ -3,8 +3,7 @@
 
 module Hirc.Types.Hirc where
 
-import Control.Concurrent.Chan
-import Control.Concurrent.MVar
+import Control.Concurrent
 import Control.Concurrent.MState
 import Control.Monad.IO.Peel
 import Control.Monad.Reader
@@ -99,6 +98,8 @@ class IsModule m where
 
   runModule          :: m -> ModuleM m ()
 
+  shutdownModule     :: m -> Maybe (ModuleState m -> HircM ())
+
 
 --------------------------------------------------------------------------------
 -- The Managed monad
@@ -108,8 +109,9 @@ type Managed = MState ManagedState (ReaderT ManagedSettings IO)
 data ManagedState = ManagedState
 
 data ManagedSettings = ManagedSettings
-  { logChanM      :: Chan (Int,String)
-  , logSettingsM  :: LogSettings
+  { logChanM       :: Chan (Int,String)
+  , logSettingsM   :: LogSettings
+  , managedThreads :: Chan ThreadId
   }
 
 

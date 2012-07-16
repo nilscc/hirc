@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns, TypeFamilies #-}
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 
 module Hirc.Modules.UrlTitles
@@ -21,16 +21,26 @@ import Hirc
 -- The module
 
 urlTitlesModule :: Module
-urlTitlesModule = Module "UrlTitles" Nothing $ do
-  onCommand "PRIVMSG" $ withParams $ \[_,text] -> do
-    let urls = filter (=~ "^(http://|https://|www\\.)") (words text)
-    case urls of
-         (url:_) -> do
-           title <- getTitle url
-           maybe (return ())
-                 (say . ("Title: " ++))
-                 title
-         _ -> return ()
+urlTitlesModule = newModule UrlTitles
+
+data UrlTitles = UrlTitles
+
+instance IsModule UrlTitles where
+  type ModuleState UrlTitles = ()
+  moduleName     _ = "UrlTitles"
+  onNickChange   _ = Nothing
+  initModule     _ = return ()
+  shutdownModule _ = Nothing
+  runModule      _ = do
+    onCommand "PRIVMSG" $ withParams $ \[_,text] -> do
+      let urls = filter (=~ "^(http://|https://|www\\.)") (words text)
+      case urls of
+           (url:_) -> do
+             title <- getTitle url
+             maybe (return ())
+                   (say . ("Title: " ++))
+                   title
+           _ -> return ()
 
 
 --------------------------------------------------------------------------------

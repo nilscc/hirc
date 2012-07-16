@@ -8,10 +8,14 @@ module Hirc.Connection.Managed
   , runManaged
   ) where
 
+import Prelude hiding (catch)
+
 import Control.Concurrent
 import Control.Concurrent.MState
 import Control.Monad.Error
 import Control.Monad.Reader
+import Control.Monad.IO.Peel
+import Control.Exception.Peel
 
 import Hirc.Types
 import Hirc.Logging
@@ -19,12 +23,13 @@ import Hirc.Logging
 
 --------------------------------------------------------------------------------
 -- | Run managed sessions
-runManaged :: MonadIO m => Managed a -> m a
-runManaged m = do
+runManaged :: MonadIO m => Chan ThreadId -> Managed a -> m a
+runManaged ctid m = do
     c <- liftIO $ newChan
     let settings = ManagedSettings
-          { logChanM     = c
-          , logSettingsM = debugManagedSettings
+          { logChanM       = c
+          , logSettingsM   = debugManagedSettings
+          , managedThreads = ctid
           }
     liftIO $ runReaderT (evalMState True (startLogging >> m) defState) settings
   where
@@ -80,9 +85,28 @@ manage eventLoop hirc = do
         , logChanH     = lc
         , logSettingsH = debugHircSettings srv
         }
-  forkM $
-    runHircWithSettings settings (startLogging >> eventLoop)
+  tid <- forkM $
+    runHircWithSettings settings (startLogging >> eventLoop `finally` shutdown)
+  t <- asks managedThreads
+  liftIO $ writeChan t tid
   logM 1 $ "Managing new server: " ++ host srv ++ ":" ++ show (port srv)
+ where
+  shutdown = do
+    logM 1 "Shutting down all modules…"
+    onMods $ \(Module mm s) -> do
+      logM 3 $ "Shutting down " ++ moduleName mm ++ "."
+      maybe (return ()) ($ s) (shutdownModule mm)
+    logM 1 "Modules offline."
+
+  onMods :: ContainsHirc m
+         => (Module -> m ())
+         -> m ()
+  onMods f = fmap runningModules getHircState
+         >>= mapM_ (\m -> f m `catch` moduleException m)
+
+  moduleException :: (LogM m, MonadPeelIO m) => Module -> SomeException -> m ()
+  moduleException (Module mm _) e = do
+    logM 1 $ "Module exception in \"" ++ moduleName mm ++ "\": " ++ show e
 
 --------------------------------------------------------------------------------
 -- Error handling

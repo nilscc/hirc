@@ -43,7 +43,6 @@ library
         Hirc.Messages
         Hirc.Utils
         Hirc.Modules.Admin
-        Hirc.Modules.Poker
         Hirc.Modules.UrlTitles
 
 
@@ -64,7 +63,9 @@ executable hirc
         regex-posix == 0.*,
         tagsoup == 0.*,
         utf8-string == 0.*,
-        random == 1.*
+        random == 1.*,
+        safecopy == 0.*,
+        acid-state == 0.*
 
 
 

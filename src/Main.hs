@@ -3,7 +3,8 @@ module Main where
 import Hirc
 import Hirc.Modules
 
-import Hirc.Modules.H3st
+--import Hirc.Modules.H3st
+import Hirc.Modules.Test
 
 main :: IO ()
 main = run
@@ -17,8 +18,9 @@ freenode = IrcServer "irc.freenode.org" 6667 (stdReconnect 3)
 
 defaultModules :: [Module]
 defaultModules =
-  [ adminModule AdminSettings{ adminPassword = Nothing, adminUsers = ["McManiaC"] }
-  , h3stModule
-  --, urlTitlesModule
+  [ adminModule emptyAdminSettings { globalAdmins = ["McManiaC"] }
+  --, h3stModule
+  , urlTitlesModule
+  , testModule
   --, pokerModule
   ]

@@ -1,27 +1,33 @@
-{-# LANGUAGE PatternGuards, TemplateHaskell, TypeFamilies, DeriveDataTypeable #-}
+{-# LANGUAGE TypeFamilies #-}
+
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 
 module Hirc.Modules.Admin
   ( adminModule
-  , AdminSettings (..)
+  , AdminSettings (..), emptyAdminSettings
   ) where
 
-import Data.Maybe
+import qualified Data.Map as M
 
 import Hirc
+import Hirc.Modules.Admin.Acid
 
-adminModule :: AdminSettings -> Module
-adminModule settings = Module "Admin" Nothing $ do
+
+--------------------------------------------------------------------------------
+-- Main module
+
+runAdminModule :: AdminM ()
+runAdminModule = do
   currentChannel <- getCurrentChannel
   onValidPrefix $ do
-    userCommand $ \"admin" "auth" pw         -> auth pw settings
-    userCommand $ \"admin" "join" channel    -> requireAuth settings $ joinChannel channel
-    userCommand $ \"admin" "part" channel    -> doneAfter $ requireAuth settings $ partChannel channel
-    userCommand $ \"admin" "part"            -> doneAfter $ requireAuth settings $ maybe (return ()) partChannel currentChannel
-    userCommand $ \"admin" "set" "nick" name -> requireAuth settings $ changeNickname name
+    userCommand $ \"admin" "auth" pw         -> auth pw
+    userCommand $ \"admin" "join" channel    -> requireAuth $ joinChannel channel
+    userCommand $ \"admin" "part" channel    -> doneAfter $ requireAuth $ partChannel channel
+    userCommand $ \"admin" "part"            -> doneAfter $ requireAuth $ maybe (return ()) partChannel currentChannel
+    userCommand $ \"admin" "set" "nick" name -> requireAuth $ changeNickname name
     userCommand $ \"admin" "help" "admin"    -> showHelp
 
-showHelp :: MessageM ()
+showHelp :: AdminM ()
 showHelp = do
   whisper "Admin module, available commands:"
   whisper "  help admin         --   show this help"
@@ -30,31 +36,38 @@ showHelp = do
   whisper "  part [<channel>]   --   part either the current or the specified channel"
   whisper "  set nick <name>    --   set a new nickname"
 
-data AdminSettings = AdminSettings
-  { adminPassword :: Maybe String
-  , adminUsers    :: [Username]
-  }
+auth :: String -> AdminM ()
+auth pw = withUsername $ \un -> do
+  response <- update $ Authenticate un pw
+  createCheckpoint
+  answer response
 
-auth :: String -> AdminSettings -> MessageM ()
-auth pw settings
-  | Nothing <- adminPassword settings =
-    answer "Password authentication disabled."
-  | Just settingsPw <- adminPassword settings
-  , pw == settingsPw =
-    withUsername $ \uname -> do
-      updateGlobal "admins" $ \ml -> case ml of
-        Nothing -> singletonList uname
-        Just l  -> concatList uname l
-      answer "You're successfully authenticated."
-  | otherwise = do
-    answer "Incorrect password."
-
-requireAuth :: AdminSettings -> MessageM () -> MessageM ()
-requireAuth settings m = do
+requireAuth :: AdminM () -> AdminM ()
+requireAuth m = do
   withUsername $ \uname -> do
-    global   <- fmap (fromMaybe [] . join . fmap fromList) (loadGlobal "admins")
-    channel  <- fmap (fromMaybe [] . join . fmap fromList) (load "admins")
-    let admins = adminUsers settings ++ global ++ channel
-    if (uname `elem` admins)
+    ia <- query $ IsAdmin uname Nothing
+    if ia
        then m
        else answer "You don't have permission to do that."
+
+
+--------------------------------------------------------------------------------
+-- Module instances
+
+adminModule :: AdminSettings -> Module
+adminModule = newModule . AdminModule
+
+newtype AdminModule = AdminModule { unAM :: AdminSettings }
+
+type AdminM a = ModuleM AdminModule a
+
+instance IsModule AdminModule where
+  type ModuleState AdminModule = AcidState AdminSettings
+  moduleName     _ = "Admin"
+  onNickChange   _ = Nothing
+  initModule     a = liftIO $ openLocalState (unAM a)
+  runModule      _ = runAdminModule
+  shutdownModule _ = Just $ liftIO . closeAcidState 
+
+emptyAdminSettings :: AdminSettings
+emptyAdminSettings = AdminSettings [] M.empty Nothing

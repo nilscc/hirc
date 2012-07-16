@@ -1,5 +1,6 @@
 logs/
 dist/
+state/
 hirc
 commands.json
 *.o
