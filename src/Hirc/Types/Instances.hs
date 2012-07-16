@@ -126,10 +126,22 @@ instance LogM HircM where
   logChan     = asks logChanH
   logSettings = asks logSettingsH
 
-instance LogM Managed where
+instance LogM ManagedM where
   logChan     = asks logChanM
   logSettings = asks logSettingsM
 
 instance LogM (MState s MessageM) where
   logChan     = lift logChan
   logSettings = lift logSettings
+
+
+--------------------------------------------------------------------------------
+-- Managed monad instances
+
+instance ContainsManaged ManagedM where
+  getManagedState = get
+  askManagedSettings = ask
+
+--instance ContainsManaged HircM where
+  --getManagedState = lift get
+  --askManagedSettings = lift ask

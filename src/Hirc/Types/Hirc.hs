@@ -48,12 +48,13 @@ data HircError
   deriving (Show, Eq)
 
 data HircSettings = HircSettings
-  { runningHirc     :: Hirc
-  , cmdChan         :: Chan ConnectionCommand
-  , msgChan         :: Chan Message
-  , errMVar         :: MVar HircError
-  , logChanH        :: Chan (Int,String)
-  , logSettingsH    :: LogSettings
+  { runningHirc        :: Hirc
+  , cmdChan            :: Chan ConnectionCommand
+  , msgChan            :: Chan Message
+  , errMVar            :: MVar HircError
+  , logChanH           :: Chan (Int,String)
+  , logSettingsH       :: LogSettings
+  , managedThreadsChan :: Chan ThreadId
   }
 
 data HircState = HircState
@@ -78,33 +79,72 @@ class ContainsHirc m => ContainsMessage m where
 --------------------------------------------------------------------------------
 -- Modules
 
+-- | The (abstract) `Module' type. To create a module you first have to define
+-- the module type and its state type:
+--
+-- > data MyModule = MyModule { initialState :: MyState }
+-- > data MyState  = MyState  { unMyState :: Int }
+-- 
+-- Then you'll need the `IsModule' instance definition, here we're using the
+-- `AcidState' type to make our state persistent between sessions:
+--
+-- > instance IsModule MyModule where
+-- >   type ModuleState MyModule = AcidState MyState
+-- >   moduleName     _ = "My Module"
+-- >   initModule     m = openLocalState (initialState m)
+-- >   shutdownModule _ = Just closeAcidState
+-- >   runModule      _ = runMyModule
+-- 
+-- Make sure to define the necessary Acid types and instances if you want to use
+-- this persistent data storage system:
+--
+-- > makeAcidic ''MyState ['myStateFunction1, 'myStateFunction2]
+-- > deriveSafeCopy 0 'base ''MyState
+--
+-- For convenience you can define a type for our new module monad:
+--
+-- > type MyModuleM a = ModuleM MyModule a
+--
+-- So your module functions look as:
+--
+-- > runMyModule :: MyModuleM ()
+-- > runMyModule = do ...
+--
+-- When you're done you'll have to create the abstract `Module' type and export
+-- it to be used in your main hirc program:
+--
+-- > myModule :: MyState    -- ^ The initial state
+-- >          -> Module
+-- > myModule initialState' = newModule (MyModule initialState')
 data Module where
   Module :: IsModule m => m -> ModuleState m -> Module
 
 type ModuleM m a = MState (ModuleState m) MessageM a
 
+-- | The main module class. The module runs in a `MState' environment with the
+-- `ModuleState m' type as state. For a persistent state see the section about
+-- the Acid state system.
 class IsModule m where
   type ModuleState m :: *
 
   moduleName         :: m -> String
-    -- ^ (Unique) module name. This should be the same as the Haskell filename of the module.
-
-  onNickChange       :: m -> Maybe (Username -> Nickname -> ModuleM m ())
-    -- ^ Optional function to be run whenever a user changes his nickname.
-    -- @Nickname@ is the new nickname whereas @Username@ should stay the same.
+    -- ^ (Unique) module name.
 
   initModule         :: m -> HircM (ModuleState m)
-    -- ^ initiate the state
+    -- ^ Since the initiate state is undefined this function will have to
+    -- initiate the state and make sure everything is loaded up correctly.
 
   runModule          :: m -> ModuleM m ()
+    -- ^ The main module function. Everytime an IRC message is received this
+    -- function will be run.
 
   shutdownModule     :: m -> Maybe (ModuleState m -> HircM ())
-
+    -- ^ Shutdown the module and optionally free/store the state system.
 
 --------------------------------------------------------------------------------
 -- The Managed monad
 
-type Managed = MState ManagedState (ReaderT ManagedSettings IO)
+type ManagedM = MState ManagedState (ReaderT ManagedSettings IO)
 
 data ManagedState = ManagedState
 
@@ -114,6 +154,9 @@ data ManagedSettings = ManagedSettings
   , managedThreads :: Chan ThreadId
   }
 
+class ContainsManaged m where
+  getManagedState    :: m ManagedState
+  askManagedSettings :: m ManagedSettings
 
 --------------------------------------------------------------------------------
 -- Logging

@@ -25,14 +25,16 @@ module Hirc
   , module Hirc.Acid
 
     -- * Messages & user commands
-  , MessageM
-  , HircM
-  , IsHircCommand (..)
-  , userCommand, onValidPrefix, onCommand
-  , done, doneAfter, getMessage, getCurrentChannel
+  , userCommand, onValidPrefix, onNickChange, onCommand
+  , done, doneAfter, getCurrentChannel
   , withNickname, withUsername, withNickAndUser, withServer, withParams
+  , MessageM, HircM
+  , ContainsMessage (..), ContainsHirc (..)
+  , IsHircCommand (..)
 
     -- * IRC types & functions
+  , answer, say, whisper, sayIn
+  , joinChannel, partChannel, sendNotice, quitServer
   , Message (..)
   , IrcServer (..)
   , Reconnect (..)
@@ -42,8 +44,6 @@ module Hirc
   , Nickname
   , Username
   , Realname
-  , answer, say, whisper, sayIn
-  , joinChannel, partChannel, sendNotice, quitServer
 
     -- * Concurrency
   , newThread
@@ -198,6 +198,19 @@ onValidPrefix wm =
   esc '}'  r = "\\}" ++ r
   esc a    r = a:r
 
+-- | If a user changes his nick, the function receives the old nickname, the
+-- username and the new nickname as arguments.
+onNickChange :: ContainsMessage m
+             => (Nickname -> Username -> Nickname -> m ())
+             -> m ()
+onNickChange m =
+  onCommand "NICK" $
+    withNickAndUser $ \old u ->
+    withParams      $ \[new] -> do
+      myNick <- getNickname
+      myUser <- getUsername
+      unless (old == myNick && u == myUser) $
+        m old u new
 
 --------------------------------------------------------------------------------
 -- Handling incoming messages
@@ -230,19 +243,22 @@ handleCTCP "\001VERSION\001" =
 handleCTCP t =
   logM 2 $ "Unhandled CTCP: " ++ t
 
+-- | Send a request to the server to change your own nickname.
 changeNickname :: ContainsHirc m => Nickname -> m ()
 changeNickname n = sendCmd $ Nick n
 
 setNickname :: ContainsHirc m => String -> m ()
 setNickname n = modifyHircState $ \s -> s { ircNickname = n }
 
+-- | Get the your own nickname.
 getNickname :: ContainsHirc m => m String
 getNickname = getHircState >>= return . ircNickname
 
--- | Get current username. If there is a leading '~' it is discarded.
+-- | Get your own username. If there is a leading '~' it is discarded.
 getUsername :: ContainsHirc m => m String
 getUsername = getHircState >>= return . dropWhile (== '~') . ircUsername
 
+-- | Get your own realname.
 getRealname :: ContainsHirc m => m String
 getRealname = getHircState >>= return . ircRealname
 
@@ -290,12 +306,9 @@ defEventLoop = do
       doneAfter       $ do
         myNick <- getNickname
         myUser <- getUsername
-        if n == myNick && u == myUser then do
+        when (n == myNick && u == myUser) $ do
            setNickname new
            logM 1 $ "Nick changed to \"" ++ new ++ "\""
-         else
-           -- call `onNickChange' if existant
-           onMods (onNick u new)
 
     onCommand "INVITE" $
       withParams $ \[_,chan] -> joinCmd chan
@@ -326,8 +339,6 @@ defEventLoop = do
     Module mm `fmap` initModule mm
   runMod (Module mm s) =
     Module mm `fmap` execMState (runModule mm) s
-  onNick u new (Module mm s) =
-    Module mm `fmap` execMState (maybe (return ()) (\f -> f u new) (onNickChange mm)) s
 
 
 --------------------------------------------------------------------------------
@@ -341,10 +352,14 @@ moduleException m@(Module mm _) e = do
 --------------------------------------------------------------------------------
 -- Concurrency
 
+-- | Start a new thread and add it to the list of managed threads.
 newThread :: MessageM () -> MessageM ThreadId
 newThread m = do
   r <- ask
-  lift $ forkM (runReaderT m r :: HircM ())
+  tid <- lift $ forkM (runReaderT m r :: HircM ())
+  tch <- lift $ asks managedThreadsChan
+  liftIO $ writeChan tch tid
+  return tid
 
 wait :: Int   -- ^ number of seconds
      -> MessageM ()

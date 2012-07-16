@@ -23,7 +23,7 @@ import Hirc.Logging
 
 --------------------------------------------------------------------------------
 -- | Run managed sessions
-runManaged :: MonadIO m => Chan ThreadId -> Managed a -> m a
+runManaged :: MonadIO m => Chan ThreadId -> ManagedM a -> m a
 runManaged ctid m = do
     c <- liftIO $ newChan
     let settings = ManagedSettings
@@ -59,7 +59,7 @@ runHircM s r = liftIO $ runErrorT (runReaderT (evalMState True (setState >> r) d
         , ircRealname = realname h
         }
 
-runHircWithSettings :: HircSettings -> HircM () -> Managed ()
+runHircWithSettings :: HircSettings -> HircM () -> ManagedM ()
 runHircWithSettings settings hirc = do
   merr <- runHircM settings hirc
   case merr of
@@ -70,25 +70,26 @@ runHircWithSettings settings hirc = do
 -- | Start and manage new connections
 manage :: EventLoop
        -> Hirc
-       -> Managed ()
+       -> ManagedM ()
 manage eventLoop hirc = do
   cmd <- liftIO newChan
   msg <- liftIO newChan
   err <- liftIO newEmptyMVar
   lc  <- liftIO newChan
+  tch <- asks managedThreads
   let srv = server hirc
       settings = HircSettings
-        { runningHirc  = hirc
-        , cmdChan      = cmd
-        , msgChan      = msg
-        , errMVar      = err
-        , logChanH     = lc
-        , logSettingsH = debugHircSettings srv
+        { runningHirc        = hirc
+        , cmdChan            = cmd
+        , msgChan            = msg
+        , errMVar            = err
+        , logChanH           = lc
+        , logSettingsH       = debugHircSettings srv
+        , managedThreadsChan = tch
         }
   tid <- forkM $
     runHircWithSettings settings (startLogging >> eventLoop `finally` shutdown)
-  t <- asks managedThreads
-  liftIO $ writeChan t tid
+  liftIO $ writeChan tch tid
   logM 1 $ "Managing new server: " ++ host srv ++ ":" ++ show (port srv)
  where
   shutdown = do
@@ -114,7 +115,7 @@ manage eventLoop hirc = do
 handleHircError :: HircError
                 -> HircSettings
                 -> HircM ()
-                -> Managed ()
+                -> ManagedM ()
 
 {-
 handleHircError H_ConnectionLost s hirc = do
