@@ -28,7 +28,6 @@ data UrlTitles = UrlTitles
 instance IsModule UrlTitles where
   type ModuleState UrlTitles = ()
   moduleName     _ = "UrlTitles"
-  onNickChange   _ = Nothing
   initModule     _ = return ()
   shutdownModule _ = Nothing
   runModule      _ = do

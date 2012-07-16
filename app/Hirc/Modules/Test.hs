@@ -27,7 +27,6 @@ makeAcidic ''TestState ['incState, 'getState]
 instance IsModule TestModule where
   type ModuleState TestModule = AcidState TestState
   moduleName     _ = "Test Module"
-  onNickChange   _ = Nothing
   initModule     _ = openLocalState $ TestState 0
   runModule      _ = runTestModule
   shutdownModule _ = Just closeAcidState

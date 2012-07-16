@@ -64,7 +64,6 @@ type AdminM a = ModuleM AdminModule a
 instance IsModule AdminModule where
   type ModuleState AdminModule = AcidState AdminSettings
   moduleName     _ = "Admin"
-  onNickChange   _ = Nothing
   initModule     a = openLocalState (unAM a)
   runModule      _ = runAdminModule
   shutdownModule _ = Just closeAcidState 
