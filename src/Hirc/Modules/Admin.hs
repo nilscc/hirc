@@ -65,9 +65,9 @@ instance IsModule AdminModule where
   type ModuleState AdminModule = AcidState AdminSettings
   moduleName     _ = "Admin"
   onNickChange   _ = Nothing
-  initModule     a = liftIO $ openLocalState (unAM a)
+  initModule     a = openLocalState (unAM a)
   runModule      _ = runAdminModule
-  shutdownModule _ = Just $ liftIO . closeAcidState 
+  shutdownModule _ = Just closeAcidState 
 
 emptyAdminSettings :: AdminSettings
 emptyAdminSettings = AdminSettings [] M.empty Nothing
