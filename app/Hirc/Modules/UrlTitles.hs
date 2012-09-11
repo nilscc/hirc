@@ -49,7 +49,8 @@ instance IsModule UrlTitles where
 getTitle :: MonadIO m => URLString -> m (Maybe String)
 getTitle url = liftIO $ do
   (code, s) <- curlGetString url [ CurlFollowLocation True, CurlMaxFileSize (1000*1000)
-                                 , CurlEncoding "UTF-8" ]
+                                 , CurlEncoding "UTF-8"
+                                 , CurlCookieFile "cookies" ]
   return $
     case code of
          CurlOK -> let t = getTitle' s
