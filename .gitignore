@@ -8,3 +8,4 @@ commands.json
 *.swp
 *.swo
 *~
+LoginData.hs
