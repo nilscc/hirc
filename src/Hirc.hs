@@ -157,16 +157,16 @@ say text =
   reply $ \to ->
     sendCmd $ PrivMsg (either id id to) text
 
-sayIn :: ContainsMessage m => Channel -> String -> m ()
+sayIn :: ContainsHirc m => Channel -> String -> m ()
 sayIn c text = sendCmd $ PrivMsg c text
 
-joinChannel :: ContainsMessage m => Channel -> m ()
+joinChannel :: ContainsHirc m => Channel -> m ()
 joinChannel ch = sendCmd $ Join ch -- TODO: store current channels somewhere?
 
-partChannel :: ContainsMessage m => Channel -> m ()
+partChannel :: ContainsHirc m => Channel -> m ()
 partChannel ch = sendCmd $ Part ch
 
-sendNotice :: ContainsMessage m => Nickname -> String -> m ()
+sendNotice :: ContainsHirc m => Nickname -> String -> m ()
 sendNotice n s = sendCmd $ Notice n s
 
 quitServer :: ContainsMessage m => Maybe String -- ^ optional quit message
@@ -307,7 +307,7 @@ defEventLoop = do
                 . handle logSTMException
 
   -- fork off modules!
-  tids <- forM mods $ \(Module mm s) -> forkM $ evalMState True `flip` s $ do
+  tids <- forM mods $ \(Module mm s) -> forkM' $ evalMState True `flip` s $ do
 
     -- run start up functions
     runMaybe $ onStartup mm
@@ -343,7 +343,7 @@ defEventLoop = do
       runMaybe $ onMessage mm
 
   -- wait for modules
-  mapM_ waitM tids
+  mapM_ waitM' tids
  where
   runMaybe (Just go) = go
   runMaybe _         = return ()
@@ -355,7 +355,7 @@ defEventLoop = do
 newThread :: MessageM () -> MessageM ThreadId
 newThread m = do
   r <- ask
-  tid <- lift $ forkM (runReaderT m r :: HircM ())
+  tid <- lift $ forkM' (runReaderT m r :: HircM ())
   tch <- lift $ asks managedThreadsChan
   liftIO $ writeChan tch tid
   return tid

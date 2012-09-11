@@ -9,7 +9,6 @@ module Hirc.Logging
   ) where
 
 import Control.Concurrent.Chan
-import Control.Concurrent.MState
 import Control.Monad
 import Control.Monad.IO.Peel
 import Control.Monad.Trans
@@ -63,10 +62,10 @@ logLoop = do
       liftIO $ putStrLn s
 
 -- | Start the log loop in a `MState` thread
-startLogging :: (LogM (MState t m), MonadPeelIO m)
-  => MState t m ()
+startLogging :: (LogM m, MonadPeelIO m, Forkable m)
+  => m ()
 startLogging = do
   liftIO $ do
     e <- doesDirectoryExist "logs"
     unless e $ createDirectory "logs"
-  forkM logLoop >> return ()
+  forkM' logLoop >> return ()

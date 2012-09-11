@@ -1,8 +1,10 @@
 {-# LANGUAGE TypeSynonymInstances, MultiParamTypeClasses, RankNTypes,
              TypeFamilies, GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Hirc.Types.Hirc where
 
+import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.MState
 import Control.Monad.IO.Peel
@@ -29,7 +31,16 @@ data Hirc = Hirc
   , modules       :: [Module]
   }
 
-type HircM = MState HircState (ReaderT HircSettings (ErrorT HircError IO))
+-- we need the error instance here!
+instance Error HircError where
+  strMsg = H_Other
+
+newtype HircM a = HircM
+  { unHircM :: MState HircState (ReaderT HircSettings (ErrorT HircError IO)) a }
+  deriving ( Monad, MonadIO, MonadState HircState
+           , MonadReader HircSettings, MonadError HircError
+           , MonadPeelIO, Functor, Applicative, MonadPlus
+           )
 
 class (LogM m, MonadPeelIO m, Functor m) => ContainsHirc m where
   askHircSettings :: m HircSettings
@@ -149,7 +160,12 @@ class IsModule m where
 --------------------------------------------------------------------------------
 -- The Managed monad
 
-type ManagedM = MState ManagedState (ReaderT ManagedSettings IO)
+newtype ManagedM a = ManagedM
+  { unManagedM :: MState ManagedState (ReaderT ManagedSettings IO) a }
+  deriving ( Monad, MonadIO , MonadPeelIO, Functor, Applicative
+           , MonadState ManagedState, MonadReader ManagedSettings
+           , MonadPlus
+           )
 
 data ManagedState = ManagedState
 
@@ -182,3 +198,11 @@ data LogSettings = LogSettings
 
 class (Monad m, Monad f) => CanRun m f where
   runInside :: f a -> m a
+
+--------------------------------------------------------------------------------
+-- Forkable class
+
+class Forkable m where
+  forkM'  :: MonadPeelIO m => m () -> m ThreadId
+  forkM_' :: MonadPeelIO m => m () -> m ()
+  waitM'  :: MonadPeelIO m => ThreadId -> m ()

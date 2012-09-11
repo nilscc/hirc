@@ -54,14 +54,14 @@ connect nick' user' rn = do
     hSetBuffering h LineBuffering
     hSetBinaryMode h False
     hSetEncoding h utf8
-  modifyM_ $ \s -> s { connectedHandle = Just h }
+  modifyHircState $ \s -> s { connectedHandle = Just h }
 
-  _ <- forkM listenForMessages
-  _ <- forkM receiveCommand
+  _ <- forkM' listenForMessages
+  _ <- forkM' receiveCommand
 
   sendCmd $ Send (nick nick')
   sendCmd $ Send (user user' "*" "*" rn)
-  modifyM_ $ \s -> s
+  modifyHircState $ \s -> s
     { ircNickname = nick'
     , ircUsername = user'
     , ircRealname = rn
@@ -118,7 +118,7 @@ receiveCommand = forever . requireHandle $ \h -> do
          -- shutdown everything
          sendMsg $ quit msg
          liftIO $ hClose h
-         modifyM_ $ \s -> s { connectedHandle = Nothing }
+         modifyHircState $ \s -> s { connectedHandle = Nothing }
          -- error will (hopefully) get cought
          throwError H_ConnectionLost
 

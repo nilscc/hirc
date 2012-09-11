@@ -31,7 +31,7 @@ runManaged ctid m = do
           , logSettingsM   = debugManagedSettings
           , managedThreads = ctid
           }
-    liftIO $ runReaderT (evalMState True (startLogging >> m) defState) settings
+    liftIO $ runReaderT (evalMState True (unManagedM $ startLogging >> m) defState) settings
   where
     defState :: ManagedState
     defState = ManagedState
@@ -40,24 +40,24 @@ runManaged ctid m = do
 -- Manage sessions
 
 runHircM :: MonadIO m => HircSettings -> HircM a -> m (Either HircError a)
-runHircM s r = liftIO $ runErrorT (runReaderT (evalMState True (setState >> r) defState) s)
-  where
-    defState :: HircState
-    defState = HircState
-      { connectedHandle = Nothing
-      , ircNickname     = ""
-      , ircUsername     = ""
-      , ircRealname     = ""
-      , runningModules  = []
+runHircM s (HircM r) = liftIO $
+  runErrorT (runReaderT (evalMState True (setState >> r) defState) s)
+ where
+  defState :: HircState
+  defState = HircState
+    { connectedHandle = Nothing
+    , ircNickname     = ""
+    , ircUsername     = ""
+    , ircRealname     = ""
+    , runningModules  = []
+    }
+  setState = do
+    h <- asks runningHirc
+    modify $ \hs -> hs
+      { ircNickname = nickname h
+      , ircUsername = username h
+      , ircRealname = realname h
       }
-    setState :: HircM ()
-    setState = do
-      h <- asks runningHirc
-      modify $ \hs -> hs
-        { ircNickname = nickname h
-        , ircUsername = username h
-        , ircRealname = realname h
-        }
 
 runHircWithSettings :: HircSettings -> HircM () -> ManagedM ()
 runHircWithSettings settings hirc = do
@@ -87,7 +87,7 @@ manage eventLoop hirc = do
         , logSettingsH       = debugHircSettings srv
         , managedThreadsChan = tch
         }
-  tid <- forkM $
+  tid <- forkM' $
     runHircWithSettings settings (startLogging >> eventLoop `finally` shutdown)
   liftIO $ writeChan tch tid
   logM 1 $ "Managing new server: " ++ host srv ++ ":" ++ show (port srv)

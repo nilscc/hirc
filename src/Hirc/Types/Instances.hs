@@ -6,6 +6,7 @@ module Hirc.Types.Instances where
 
 import Control.Concurrent.MState
 import Control.Monad.Error
+import Control.Monad.IO.Peel
 import Control.Monad.Reader
 import Control.Monad.Trans.Peel
 
@@ -13,8 +14,6 @@ import Hirc.Types.Commands
 import Hirc.Types.Hirc
 
 
-instance Error HircError where
-  strMsg = H_Other
 
 
 --------------------------------------------------------------------------------
@@ -23,14 +22,19 @@ instance Error HircError where
 instance ContainsHirc HircM where
   askHircSettings = ask
   getHircState    = get
-  modifyHircState = modifyM_
+  modifyHircState f = HircM $ modifyM_ f
 
-instance ContainsHirc MessageM where
-  askHircSettings = lift ask
-  getHircState    = lift get
-  modifyHircState = lift . modifyM_
+instance ContainsHirc m => ContainsHirc (ReaderT r m) where
+  askHircSettings = lift askHircSettings
+  getHircState    = lift getHircState
+  modifyHircState = lift . modifyHircState
 
-instance ContainsHirc (MState s MessageM) where
+--instance ContainsHirc (MState s MessageM) where
+  --askHircSettings = lift askHircSettings
+  --getHircState    = lift getHircState
+  --modifyHircState = lift . modifyHircState
+
+instance ContainsHirc m => ContainsHirc (MState t m) where
   askHircSettings = lift askHircSettings
   getHircState    = lift getHircState
   modifyHircState = lift . modifyHircState
@@ -44,7 +48,6 @@ instance ContainsMessage (MState s MessageM) where
   localMessage f s = do
     k <- peel
     join $ lift $ local f (k s)
-
 
 --------------------------------------------------------------------------------
 -- X runs in Y
@@ -118,10 +121,6 @@ mkHcRunInside f = HC_Run $ runInside $ f >>= return . toCmd
 --------------------------------------------------------------------------------
 -- Log instances
 
-instance LogM MessageM where
-  logChan     = lift logChan
-  logSettings = lift logSettings
-
 instance LogM HircM where
   logChan     = asks logChanH
   logSettings = asks logSettingsH
@@ -130,7 +129,11 @@ instance LogM ManagedM where
   logChan     = asks logChanM
   logSettings = asks logSettingsM
 
-instance LogM (MState s MessageM) where
+instance (LogM m) => LogM (MState s m) where
+  logChan     = lift logChan
+  logSettings = lift logSettings
+
+instance (LogM m) => LogM (ReaderT t m) where
   logChan     = lift logChan
   logSettings = lift logSettings
 
@@ -145,3 +148,21 @@ instance ContainsManaged ManagedM where
 --instance ContainsManaged HircM where
   --getManagedState = lift get
   --askManagedSettings = lift ask
+
+--------------------------------------------------------------------------------
+-- Forkable instances
+
+instance MonadPeelIO m => Forkable (MState t m) where
+  forkM'  = forkM
+  forkM_' = forkM_
+  waitM'  = waitM
+
+instance Forkable HircM where
+  forkM'  (HircM t) = HircM $ forkM t
+  forkM_' (HircM t) = HircM $ forkM_ t
+  waitM'  t         = HircM $ waitM t
+
+instance Forkable ManagedM where
+  forkM'  (ManagedM t) = ManagedM $ forkM t
+  forkM_' (ManagedM t) = ManagedM $ forkM_ t
+  waitM'  t            = ManagedM $ waitM t
