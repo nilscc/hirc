@@ -1,4 +1,8 @@
-{-# LANGUAGE ViewPatterns, ScopedTypeVariables, NamedFieldPuns #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE PatternGuards #-}
+
 {-# OPTIONS -fno-warn-incomplete-patterns
             -fno-warn-missing-fields
             -fno-warn-unused-do-bind
@@ -19,7 +23,7 @@ module Hirc
 
     -- * Module types & functions
   , Module, newModule
-  , ModuleM, IsModule (..)
+  , ModuleM, ModuleMessageM, IsModule (..)
 
     -- ** Module acid states
   , module Hirc.Acid
@@ -71,6 +75,7 @@ import Control.Monad.IO.Peel
 import Control.Monad.Error
 import Control.Monad.Reader
 import Control.Exception.Peel
+import Data.Maybe
 import Text.Regex.Posix
 
 import Hirc.Acid
@@ -280,74 +285,68 @@ defEventLoop = do
   mapM_ joinCmd chs
 
   -- init modules
-  mods <- asks $ modules . runningHirc
-  modifyHircState $ \hs ->
-    hs { runningModules = mods }
-  onMods initMod
+  mods_uninitialized <- asks $ modules . runningHirc
+  mods <- fmap catMaybes . forM mods_uninitialized $ \(Module mm _) ->
+    catch ((Just . Module mm) `fmap` initModule mm)
+          (\(e :: SomeException) -> do
+            logM 1 $ "Initialization of module \"" ++ (moduleName mm) ++ "\" failed:" ++ show e
+            return Nothing)
 
   let logIOException (e :: IOException) = do
-        logM 1 $ "IO exception: " ++ show e
+        lift $ logM 1 $ "IO exception: " ++ show e
         throwError H_ConnectionLost
       logSTMException (e :: BlockedIndefinitelyOnSTM) = do
-        logM 1 $ "Blocked indefinitely on STM transaction: " ++ show e
+        lift $ logM 1 $ "Blocked indefinitely on STM transaction: " ++ show e
         throwError H_ConnectionLost
+      --logModuleException n (e :: SomeException) = do
+        --lift $ logM 1 $ "Module exception in \"" ++ n ++ "\": " ++ show e
+        --throwError e
 
-      handleAll = handle logSTMException
-                . handle logIOException
+      handleAll = -- handle (logModuleException n)
+                  handle logIOException
+                . handle logSTMException
 
-  handleAll . forever . handleIncomingMessage $ do
+  -- fork off modules!
+  tids <- forM mods $ \(Module mm s) -> forkM $ evalMState True `flip` s $ do
 
-    onCommand "PING" $
-      pongCmd
+    -- run start up functions
+    runMaybe $ onStartup mm
 
-    onCommand "NICK" $
-      withNickAndUser $ \n u ->
-      withParams      $ \[new] ->
-      doneAfter       $ do
-        myNick <- getNickname
-        myUser <- getUsername
-        when (n == myNick && u == myUser) $ do
-           setNickname new
-           logM 1 $ "Nick changed to \"" ++ new ++ "\""
+    handleAll . forever . handleIncomingMessage $ do
 
-    onCommand "INVITE" $
-      withParams $ \[_,chan] -> joinCmd chan
+      onCommand "PING" $
+        pongCmd
 
-    onCommand "PRIVMSG" $ do
+      onCommand "NICK" $
+        withNickAndUser $ \n u ->
+        withParams      $ \[new] ->
+        doneAfter       $ do
+          myNick <- getNickname
+          myUser <- getUsername
+          when (n == myNick && u == myUser) $ do
+             setNickname new
+             logM 1 $ "Nick changed to \"" ++ new ++ "\""
 
-      -- run CTCP shit, this stuff is a TODO
-      withParams $ \[_,text] ->
-        when (isCTCP text) $ do
-          handleCTCP text `catch` \(e :: SomeException) ->
-            logM 1 $ "CTCP exception: " ++ show e
-          done
+      onCommand "INVITE" $
+        withParams $ \[_,chan] -> joinCmd chan
 
-    -- run user modules
-    onMods runMod
+      onCommand "PRIVMSG" $ do
+
+        -- run CTCP shit, this stuff is a TODO
+        withParams $ \[_,text] ->
+          when (isCTCP text) $ do
+            handleCTCP text `catch` \(e :: SomeException) ->
+              logM 1 $ "CTCP exception: " ++ show e
+            done
+
+      -- pass message to module
+      runMaybe $ onMessage mm
+
+  -- wait for modules
+  mapM_ waitM tids
  where
-  onMods :: ContainsHirc m
-         => (Module -> m Module)
-         -> m ()
-  onMods f = fmap runningModules getHircState
-         >>= mapM (\m -> f m `catch` moduleException m)
-         >>= setMods
-
-  setMods mods' = 
-    modifyHircState $ \hs -> hs { runningModules = mods' }
-
-  initMod (Module mm _) =
-    Module mm `fmap` initModule mm
-  runMod (Module mm s) =
-    Module mm `fmap` execMState (runModule mm) s
-
-
---------------------------------------------------------------------------------
--- Exceptions
-
-moduleException :: (LogM m, MonadPeelIO m) => Module -> SomeException -> m Module
-moduleException m@(Module mm _) e = do
-  logM 1 $ "Module exception in \"" ++ moduleName mm ++ "\": " ++ show e
-  return m
+  runMaybe (Just go) = go
+  runMaybe _         = return ()
 
 --------------------------------------------------------------------------------
 -- Concurrency

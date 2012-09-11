@@ -6,6 +6,7 @@
 module Hirc.Messages where
 
 import Prelude hiding (catch)
+import Control.Concurrent.MState
 import Control.Monad
 import Control.Monad.Error
 import Control.Monad.Reader
@@ -17,10 +18,11 @@ import Hirc.Connection
 import Hirc.Types
 
 
-handleIncomingMessage :: MessageM () -> HircM ()
+handleIncomingMessage :: ModuleMessageM m () -> ModuleM m ()
 handleIncomingMessage m = do
-  msg <- getMsg
-  runReaderT (m `catchError` noMsgErr) msg
+  msg <- lift getMsg
+  mapMState (runReaderT `flip` msg)
+    (m `catchError` noMsgErr)
  where
   noMsgErr e | e == noMsg = return ()
              | otherwise  = throwError e

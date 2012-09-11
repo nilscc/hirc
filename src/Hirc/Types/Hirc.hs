@@ -93,7 +93,8 @@ class ContainsHirc m => ContainsMessage m where
 -- >   moduleName     _ = "My Module"
 -- >   initModule     m = openLocalState (initialState m)
 -- >   shutdownModule _ = Just closeAcidState
--- >   runModule      _ = runMyModule
+-- >   onStartup      _ = Nothing
+-- >   onMessage      _ = Just myOnMessage
 -- 
 -- Make sure to define the necessary Acid types and instances if you want to use
 -- this persistent data storage system:
@@ -103,12 +104,12 @@ class ContainsHirc m => ContainsMessage m where
 --
 -- For convenience you can define a type for our new module monad:
 --
--- > type MyModuleM a = ModuleM MyModule a
+-- > type MyModuleM a = ModuleMessageM MyModule a
 --
--- So your module functions look as:
+-- So your module functions look like:
 --
--- > runMyModule :: MyModuleM ()
--- > runMyModule = do ...
+-- > myOnMessage :: MyModuleM ()
+-- > myOnMessage = do ...
 --
 -- When you're done you'll have to create the abstract `Module' type and export
 -- it to be used in your main hirc program:
@@ -119,7 +120,8 @@ class ContainsHirc m => ContainsMessage m where
 data Module where
   Module :: IsModule m => m -> ModuleState m -> Module
 
-type ModuleM m a = MState (ModuleState m) MessageM a
+type ModuleM        m a = MState (ModuleState m) HircM    a
+type ModuleMessageM m a = MState (ModuleState m) MessageM a
 
 -- | The main module class. The module runs in a `MState' environment with the
 -- `ModuleState m' type as state. For a persistent state see the section about
@@ -134,12 +136,15 @@ class IsModule m where
     -- ^ Since the initiate state is undefined this function will have to
     -- initiate the state and make sure everything is loaded up correctly.
 
-  runModule          :: m -> ModuleM m ()
-    -- ^ The main module function. Everytime an IRC message is received this
-    -- function will be run.
-
   shutdownModule     :: m -> Maybe (ModuleState m -> HircM ())
     -- ^ Shutdown the module and optionally free/store the state system.
+
+  onStartup          :: m -> Maybe (ModuleM m ())
+    -- ^ Run this once after the module has been initialized, for example for
+    -- time scheduled jobs. Shares the state with `onMessage'.
+
+  onMessage          :: m -> Maybe (ModuleMessageM m ())
+    -- ^ Everytime an IRC message is received this function will be run.
 
 --------------------------------------------------------------------------------
 -- The Managed monad
