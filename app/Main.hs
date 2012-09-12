@@ -4,7 +4,7 @@ import Hirc
 import Hirc.Modules
 
 --import Hirc.Modules.H3st
-import Hirc.Modules.Test
+--import Hirc.Modules.Test
 
 main :: IO ()
 main = run
@@ -21,6 +21,6 @@ defaultModules =
   [ adminModule emptyAdminSettings { globalAdmins = ["McManiaC"] }
   --, h3stModule
   , urlTitlesModule
-  , testModule
+  --, testModule
   --, pokerModule
   ]

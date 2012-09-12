@@ -59,14 +59,15 @@ adminModule = newModule . AdminModule
 
 newtype AdminModule = AdminModule { unAM :: AdminSettings }
 
-type AdminM a = ModuleM AdminModule a
+type AdminM a = ModuleMessageM AdminModule a
 
 instance IsModule AdminModule where
   type ModuleState AdminModule = AcidState AdminSettings
   moduleName     _ = "Admin"
   initModule     a = openLocalState (unAM a)
-  runModule      _ = runAdminModule
   shutdownModule _ = Just closeAcidState 
+  onStartup      _ = Nothing
+  onMessage      _ = Just runAdminModule
 
 emptyAdminSettings :: AdminSettings
 emptyAdminSettings = AdminSettings [] M.empty Nothing

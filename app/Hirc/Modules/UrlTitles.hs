@@ -30,7 +30,8 @@ instance IsModule UrlTitles where
   moduleName     _ = "UrlTitles"
   initModule     _ = return ()
   shutdownModule _ = Nothing
-  runModule      _ = do
+  onStartup      _ = Nothing
+  onMessage      _ = Just $ do
     onCommand "PRIVMSG" $ withParams $ \[_,text] -> do
       let urls = filter (=~ "^(http://|https://|www\\.)") (words text)
       case urls of
