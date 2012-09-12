@@ -3,7 +3,9 @@
 all: install
 
 install:
+	git rebase master production
 	cabal install --bindir=.
+	git checkout master
 
 run: install
 	./hirc
