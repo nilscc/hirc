@@ -28,10 +28,10 @@ instance Error HircError where
 -}
 
 newtype HircM a = HircM
-  { unHircM :: ReaderT HircSettings (ExceptT HircError IO) a }
+  { unHircM :: ReaderT HircInstance (ExceptT HircError IO) a }
   deriving ( Monad, MonadIO
            , Functor, Applicative
-           , MonadReader HircSettings
+           , MonadReader HircInstance
            , MonadError HircError
            )
 
@@ -48,26 +48,51 @@ data HircError
 
 --instance Monoid HircError
 
-data Hirc = Hirc
+data LogSettings = LogSettings
+  { logLevel      :: Int
+  , logPrintLevel :: Int
+  , logFile       :: FilePath
+  }
+
+data HircDefinition = HircDefinition
   { server        :: IrcServer
-  , channels      :: [Channel]
-  , nickname      :: TVar String
-  , username      :: TVar String
-  , realname      :: TVar String
   , modules       :: [Module]
   }
 
-data HircSettings = HircSettings
-  { runningHirc        :: Hirc
-  , networkHandle      :: TVar (Maybe Handle)
-  , listenThreadId     :: TVar (Maybe ThreadId)
-  , cmdThreadId        :: TVar (Maybe ThreadId)
-  , cmdChan            :: Chan ConnectionCommand
-  , msgChan            :: Chan Message
-  , errMVar            :: MVar HircError
-  , logChanH           :: Chan (Int,String)
-  , logSettingsH       :: LogSettings
-  , managedThreadsChan :: Chan ThreadId
+data IrcInstance = IrcInstance
+
+  -- IO & thread communication
+  { networkHandle       :: TVar (Maybe Handle)
+  , listenThreadId      :: TVar (Maybe ThreadId)
+  , cmdThreadId         :: TVar (Maybe ThreadId)
+
+  , cmdChan             :: Chan ConnectionCommand
+  , msgChan             :: Chan Message
+
+  -- IRC properties
+  , ircChannels         :: TVar [Channel]
+  , ircNickname         :: TVar String
+  , ircUsername         :: TVar String
+  , ircRealname         :: TVar String
+  }
+
+data LogInstance = LogInstance
+  { logSettings         :: LogSettings
+
+  -- IO & thread communication
+  , logThreadId         :: TVar (Maybe ThreadId)
+  , logChan             :: Chan (Int,String)
+  }
+
+data HircInstance = HircInstance
+  { hircDefinition      :: HircDefinition
+
+  , ircInstance         :: TVar (Maybe IrcInstance)
+  , logInstance         :: TVar (Maybe LogInstance)
+
+  -- IO & thread communication
+  --, errMVar             :: MVar HircError
+  --, managedThreadsChan  :: Chan ThreadId
   }
 
 {-
@@ -86,7 +111,7 @@ data HircState = HircState
 
 type MessageM = ReaderT Message HircM
 
-class MonadReader HircSettings m => ContainsMessage m where
+class MonadReader HircInstance m => ContainsMessage m where
   getMessage :: m Message
   localMessage :: (Message -> Message) -> m a -> m a
 
@@ -176,20 +201,6 @@ data ManagedSettings = ManagedSettings
   , logSettingsM   :: LogSettings
   , managedThreads :: Chan ThreadId
   }
-
---------------------------------------------------------------------------------
--- Logging
-
-class MonadIO m => LogM m where
-  logChan     :: m (Chan (Int,String))
-  logSettings :: m LogSettings
-
-data LogSettings = LogSettings
-  { logLevel      :: Int
-  , logPrintLevel :: Int
-  , logFile       :: FilePath
-  }
-
 
 --------------------------------------------------------------------------------
 -- X runs in Y

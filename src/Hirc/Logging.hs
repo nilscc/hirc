@@ -1,17 +1,16 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 module Hirc.Logging
-  ( logM
-  , startLogging
+  ( startLogging
+  , logIO
     -- * Log settings
   , debugHircSettings
   , debugManagedSettings
   ) where
 
-import Control.Concurrent.Chan
+import Control.Concurrent
+import Control.Concurrent.STM
 import Control.Monad
-import Control.Monad.IO.Peel
-import Control.Monad.Trans
 import Data.Time
 import System.Directory
 
@@ -40,32 +39,43 @@ debugManagedSettings = LogSettings
 --
 
 -- | Log a message
-logM :: LogM m => Int -> String -> m ()
-logM l s = do
-  now <- liftIO getCurrentTime
+logIO :: LogInstance -> Int -> String -> IO ()
+logIO inst l s = do
+
+  -- add timestamp to log message
+  now <- getCurrentTime
   let f = "(" ++ show now ++ ") " ++ s
-  lc <- logChan
-  liftIO $ writeChan lc (l,f)
 
-logLoop :: LogM m => m ()
-logLoop = do
-  lc <- logChan
-  LogSettings lF lP fp <- logSettings
-  now <- liftIO getCurrentTime
-  liftIO $
+  -- write msg to log chan
+  writeChan (logChan inst) (l,f)
+
+-- | Store all log messages in the \"logs\" directory
+startLogging :: LogInstance -> IO ()
+startLogging inst = do
+
+  -- lookup log settings
+  let LogSettings lF lP fp = logSettings inst
+
+  -- retrieve valid log chan
+  let lc = logChan inst
+
+  -- check if logging directory exists
+  e <- doesDirectoryExist "logs"
+  unless e $ createDirectory "logs"
+
+  -- start a new thread which stores all log messages
+  tid <- forkIO $ do
+    now <- getCurrentTime
     writeFile fp $ "New logging session [" ++ show now ++ "]\n\n"
-  forever $ do
-    (l,s) <- liftIO $ readChan lc
-    when (l <= lF) $
-      liftIO $ appendFile fp (s++"\n")
-    when (l <= lP) $
-      liftIO $ putStrLn s
+    forever $ do
+      (l,s) <- readChan lc
+      when (l <= lF) $
+        appendFile fp (s++"\n")
+      when (l <= lP) $
+        putStrLn s
 
--- | Start the log loop in a `MState` thread
-startLogging :: (LogM m, MonadPeelIO m, Forkable m)
-  => m ()
-startLogging = do
-  liftIO $ do
-    e <- doesDirectoryExist "logs"
-    unless e $ createDirectory "logs"
-  forkM' logLoop >> return ()
+  -- store thread ID & kill old logging thread if necessary
+  mOldTid <- atomically $ swapTVar (logThreadId inst) (Just tid)
+  case mOldTid of
+    Just oldTid -> killThread oldTid
+    Nothing     -> return ()

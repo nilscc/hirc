@@ -123,6 +123,7 @@ mkHcRunInside f = HC_Run $ runInside $ f >>= return . toCmd
 --------------------------------------------------------------------------------
 -- Log instances
 
+{-
 instance LogM HircM where
   logChan     = asks logChanH
   logSettings = asks logSettingsH
@@ -131,15 +132,14 @@ instance LogM ManagedM where
   logChan     = asks logChanM
   logSettings = asks logSettingsM
 
-{-
 instance (LogM m) => LogM (MState s m) where
   logChan     = lift logChan
   logSettings = lift logSettings
--}
 
 instance (LogM m) => LogM (ReaderT t m) where
   logChan     = lift logChan
   logSettings = lift logSettings
+-}
 
 
 --------------------------------------------------------------------------------
