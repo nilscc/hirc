@@ -6,7 +6,6 @@ module Hirc.Connection
       -- * Connection
       connect
     , sendCmd
-    , sendMsg
     , getMsg
 
       -- * Settings
