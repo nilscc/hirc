@@ -59,10 +59,19 @@ data HircDefinition = HircDefinition
   , modules       :: [Module]
   }
 
+data IrcDefinition = IrcDefinition
+  { ircServer           :: IrcServer
+  , ircChannels         :: [Channel]
+  , ircNickname         :: String
+  , ircUsername         :: String
+  , ircRealname         :: String
+  }
+
 data IrcInstance = IrcInstance
+  { ircDefinition       :: IrcDefinition
 
   -- IO & thread communication
-  { networkHandle       :: TVar (Maybe Handle)
+  , networkHandle       :: TVar (Maybe Handle)
   , listenThreadId      :: TVar (Maybe ThreadId)
   , cmdThreadId         :: TVar (Maybe ThreadId)
 
@@ -70,10 +79,10 @@ data IrcInstance = IrcInstance
   , msgChan             :: Chan Message
 
   -- IRC properties
-  , ircChannels         :: TVar [Channel]
-  , ircNickname         :: TVar String
-  , ircUsername         :: TVar String
-  , ircRealname         :: TVar String
+  , currentChannels     :: TVar [Channel]
+  , currentNickname     :: TVar String
+  , currentUsername     :: TVar String
+  , currentRealname     :: TVar String
   }
 
 data LogInstance = LogInstance

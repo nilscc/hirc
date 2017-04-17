@@ -25,8 +25,8 @@ import Control.Exception
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad
-import Control.Monad.Except
-import Control.Monad.Reader
+--import Control.Monad.Except
+--import Control.Monad.Reader
 --import Data.Foldable
 --import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -42,170 +42,160 @@ import Hirc.Types
 import Hirc.Connection.Managed
 import Hirc.Logging
 
+requireTVar :: TVar (Maybe a) -> STM a
+requireTVar v = readTVar v >>= maybe retry return
+
 -- | Standard reconnect settings with 1 hours delay between retries
 stdReconnect :: Int -> Reconnect
 stdReconnect t = Reconnect t 0 (60 * 60 * 1) Nothing
 
 -- | Connect to a IRC server, returns two functions. The first one will return
 -- incoming messages, the second will handle commands
-connect :: String     -- ^ nick
-        -> String     -- ^ user
-        -> String     -- ^ realname
-        -> HircM ()
-connect nick' user' rn = do
-
-  hrc <- ask
-
-  -- make sure we close previous connections
-  liftIO $ shutdown hrc
+connect :: IrcDefinition -> Maybe LogInstance -> IO (Either IOException IrcInstance)
+connect def@(IrcDefinition srv chans nick' user' rn) mlog = handle (return . Left) $ do
 
   -- try to connect to server
-  let srv = server (runningHirc hrc)
-  eh <- liftIO $
-    (Right `fmap` connectTo (host srv) (PortNumber (port srv))) `catchError` (return . Left)
-  case eh of
+  h <- connectTo (host srv) (PortNumber (port srv))
 
-    -- error during connection => rethrow error
-    Left e -> do
-      logM 1 $ "Connection to \"" ++ host srv ++ ":" ++ show (port srv) ++ "\" failed: " ++ show e
-      throwError H_ConnectionFailed
+  -- fix handle settings
+  hSetBuffering  h LineBuffering
+  hSetBinaryMode h False
+  hSetEncoding   h utf8
 
-    -- everything ok => store handle
-    Right h -> do
+  --
+  -- create instance object
+  --
 
-      liftIO $ do
+  -- IO & thread communication
+  hv <- newTVarIO $ Just h
+  cc <- newChan -- commands
+  mc <- newChan -- messages
+  lv <- newTVarIO Nothing -- listen worker thread ID
+  cv <- newTVarIO Nothing -- command worker thread ID
 
-        -- fix handle settings
-        hSetBuffering h LineBuffering
-        hSetBinaryMode h False
-        hSetEncoding h utf8
+  -- current IRC state
+  csv <- newTVarIO [] -- current channels
+  nv  <- newTVarIO nick'
+  uv  <- newTVarIO user'
+  rv  <- newTVarIO rn
 
-        -- start workerthreads
-        listenTID <- forkIO $ listenForMessages hrc h
-        cmdTID    <- forkIO $ handleCommands    hrc
+  let inst = IrcInstance def hv lv cv cc mc csv nv uv rv
 
-        -- store handle + thread IDs
-        atomically $ do
-          writeTVar (networkHandle  hrc) (Just h)
-          writeTVar (listenThreadId hrc) (Just listenTID)
-          writeTVar (cmdThreadId    hrc) (Just cmdTID)
+  --
+  -- start workerthreads
+  --
 
-      -- send user information to server
-      sendCmd $ Send (nick (B8.pack nick'))
-      sendCmd $ Send (user (B8.pack user') "*" "*" (B8.pack rn))
+  -- wait until thread ID is set before doing anything
+  let wait v = atomically $ requireTVar v
 
-      -- store user information
-      liftIO $ atomically $ do
-        writeTVar (nickname $ runningHirc hrc) nick'
-        writeTVar (username $ runningHirc hrc) user'
-        writeTVar (realname $ runningHirc hrc) rn
+  listenTID <- forkIO $ wait lv >> listenForMessages inst mlog
+  cmdTID    <- forkIO $ wait cv >> handleIrcCommands inst mlog `finally` shutdown inst mlog
 
-      -- wait for OK from IRC server
-      waitFor001
+  -- set worker thread IDs
+  atomically $ do
+    writeTVar lv (Just listenTID)
+    writeTVar cv (Just cmdTID)
 
- where
+  -- give command to send user information to server
+  sendCmd inst $ Send (nick (B8.pack nick'))
+  sendCmd inst $ Send (user (B8.pack user') "*" "*" (B8.pack rn))
+
   -- Wait for the 001 message before "giving away" our connection
-  waitFor001 :: HircM ()
-  waitFor001 = do
-    msg <- getMsg
-    logM 3 $ "waitFor001 --- " ++ show msg
-    case msg of
-         Message { msg_command = "001" } -> return ()
-         _                               -> waitFor001
+  let waitFor001 = do
+        msg <- getMsg inst
+        logMaybeIO mlog 3 $ "waitFor001 --- " ++ show msg
+        case msg of
+          Message { msg_command = "001" } -> return ()
+          _                               -> waitFor001
 
--- | Shutdown all of hirc, including current thread
-shutdownSelf :: HircSettings -> IO a
-shutdownSelf hrc = shutdown hrc >> throw ThreadKilled
+  waitFor001
+
+  -- send join commands for all channels
+  mapM_ (sendCmd inst . Join) chans
+
+  return $ Right inst
 
 -- | Shutdown all of hirc, but do not kill own thread
-shutdown :: HircSettings -> IO ()
-shutdown hrc = do
+shutdown :: IrcInstance -> Maybe LogInstance -> IO ()
+shutdown inst mlog = do
+
+  (mh, tids) <- atomically $ do
+
+    -- get current handle
+    mh <- swapTVar (networkHandle inst) Nothing
+
+    -- get all worker thread IDs
+    c  <- swapTVar (cmdThreadId inst)    Nothing
+    l  <- swapTVar (listenThreadId inst) Nothing
+    let tids = [ tid | Just tid <- [c,l]]
+
+    return (mh, tids)
+
+  logMaybeIO mlog 3 $ "Shutting down IRC instance. Handle = " ++ show mh ++ ", Thread IDs = " ++ show tids
 
   -- close handle
-  mh <- liftIO $ atomically $ swapTVar (networkHandle hrc) Nothing
-  case mh of
-    Just h  -> hClose h
-    Nothing -> return ()
-
-  -- lookup current thread IDs and reset state to Nothing
-  tids <- liftIO $ atomically $ do
-    c <- swapTVar (cmdThreadId hrc)    Nothing
-    l <- swapTVar (listenThreadId hrc) Nothing
-    return [ tid | Just tid <- [c,l]]
+  maybe (return ()) hClose mh
 
   -- kill other worker threads (not own!)
   myTID <- myThreadId
   mapM_ (\tid -> unless (tid == myTID) (killThread tid)) tids
 
 
-
 -------------------------------------------------------------------------------
 -- Worker Threads
 
 -- Wait for commands, execute them
-handleCommands :: HircSettings -> IO ()
-handleCommands hrc = forever $ do
+handleIrcCommands :: IrcInstance -> Maybe LogInstance -> IO ()
+handleIrcCommands inst _mlog = forever $ do
 
-  c <- readChan (cmdChan hrc) `catch` (\BlockedIndefinitelyOnMVar -> shutdownSelf hrc)
+  c <- readChan (cmdChan inst)
   case c of
 
-       Send msg           -> sendMsg hrc $ msg
-       PrivMsg to msg     -> sendMsg hrc $ privmsg (B8.pack to) (T.encodeUtf8 msg)
-       Notice  to msg     -> sendMsg hrc $ notice  to msg
-       Join chan          -> sendMsg hrc $ joinChan chan
-       Part chan          -> sendMsg hrc $ part chan
-       Nick new           -> sendMsg hrc $ nick (B8.pack new)
+       Send msg           -> sendMsg inst $ msg
+       PrivMsg to msg     -> sendMsg inst $ privmsg (B8.pack to) (T.encodeUtf8 msg)
+       Notice  to msg     -> sendMsg inst $ notice  to msg
+       Join chan          -> sendMsg inst $ joinChan chan
+       Part chan          -> sendMsg inst $ part chan
+       Nick new           -> sendMsg inst $ nick (B8.pack new)
 
-       Ping               -> sendMsg hrc $ Message Nothing "PING" []
-       Pong               -> sendMsg hrc $ Message Nothing "PONG" []
+       Ping               -> sendMsg inst $ Message Nothing "PING" []
+       Pong               -> sendMsg inst $ Message Nothing "PONG" []
 
        Quit msg           ->
-         sendMsg hrc (quit (T.encodeUtf8 <$> msg)) `finally` shutdownSelf hrc
+         sendMsg inst (quit (T.encodeUtf8 <$> msg)) `finally` throw ThreadKilled
 
 -- Listen on handle and put incoming messages to our Chan
-listenForMessages :: HircSettings -> Handle -> IO ()
-listenForMessages hrc h = forever $ do
+listenForMessages :: IrcInstance -> Maybe LogInstance -> IO ()
+listenForMessages inst mlog = forever $ do
+
+  -- get current handle & output chan
+  h <- atomically $ requireTVar (networkHandle inst)
 
   bs <- BS.hGetLine h
   case decode bs of
 
     -- successful message decode
-    Just m -> do
-      liftIO $ writeChan (msgChan hrc) m
+    Just m -> writeChan (msgChan inst) m
 
     -- fallback TODO
-    _ -> logH 1 $ "Could not decode bytestring: " ++ B8.unpack bs
-
- where
-  logH i m = do
-    writeChan (logChanH hrc) (i,m)
-
+    _ -> logMaybeIO mlog 1 $ "Could not decode bytestring: " ++ B8.unpack bs
 
 -------------------------------------------------------------------------------
 -- Helper functions
 
 -- Sending/receiving commands/messages
 
-sendCmd :: ConnectionCommand -> HircM ()
-sendCmd c = do
-  cmd <- asks cmdChan
-  liftIO $ writeChan cmd c
+sendCmd :: IrcInstance -> ConnectionCommand -> IO ()
+sendCmd inst c = writeChan (cmdChan inst) c
 
-getMsg :: HircM Message
-getMsg = do
-  msg <- asks msgChan
-  liftIO $ readChan msg
+getMsg :: IrcInstance -> IO Message
+getMsg inst = readChan (msgChan inst)
 
 -- | Send a message in current Hirc instance
-sendMsg :: HircSettings -> Message -> IO ()
-sendMsg hrc m = do
+sendMsg :: IrcInstance -> Message -> IO ()
+sendMsg inst m = do
 
-  -- get (and wait for, if not available) handle
-  h <- atomically $ do
-    mh <- readTVar (networkHandle hrc)
-    case mh of
-      Just h -> return h
-      Nothing -> retry
+  h <- atomically $ requireTVar (networkHandle inst)
 
   -- send encoded message
   B8.hPutStrLn h $ encode m

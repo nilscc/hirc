@@ -3,16 +3,17 @@
 {-# OPTIONS -fno-warn-unused-do-bind #-}
 
 module Hirc.Connection.Managed
-  (
+  ( runHircM
 
     -- * Running managed connections
-    manage
-  , runManaged
+  --   manage
+  -- , runManaged
   ) where
 
 import Prelude
 
-import Control.Concurrent
+--import Control.Concurrent
+import Control.Concurrent.STM
 import Control.Monad.Except
 import Control.Monad.Reader
 
@@ -22,6 +23,7 @@ import Hirc.Logging
 
 --------------------------------------------------------------------------------
 -- | Run managed sessions
+{-
 runManaged :: MonadIO m => Chan ThreadId -> ManagedM a -> m a
 runManaged ctid m = do
     c <- liftIO $ newChan
@@ -31,12 +33,22 @@ runManaged ctid m = do
           , managedThreads = ctid
           }
     liftIO $ runReaderT (unManagedM $ startLogging >> m) settings
+-}
 
 --------------------------------------------------------------------------------
 -- Manage sessions
 
-runHircM :: MonadIO m => HircSettings -> HircM a -> m (Either HircError a)
-runHircM s (HircM r) = liftIO $ runExceptT $ runReaderT r s
+runHircM :: MonadIO m => HircDefinition -> HircM a -> m (Either HircError a)
+runHircM def (HircM r) = liftIO $ do
+
+  -- create new hirc instances
+  ircInst <- newTVarIO Nothing
+  logInst <- newTVarIO . Just =<< startLogging (debugHircSettings (server def))
+  let inst = HircInstance def ircInst logInst
+
+  -- run hirc monad
+  runExceptT $ runReaderT r inst
+
   {-
  where
   defState :: HircSettings
@@ -66,6 +78,7 @@ runHircWithSettings settings hirc = do
 -}
 
 
+{-
 -- | Start and manage new connections
 manage :: EventLoop
        -> Hirc
@@ -112,6 +125,7 @@ manage eventLoop hirc = do
   moduleException :: LogM m => Module -> HircError -> m ()
   moduleException (Module mm _) e = do
     logM 1 $ "Module exception in \"" ++ moduleName mm ++ "\": " ++ show e
+-}
 
 --------------------------------------------------------------------------------
 -- Error handling
