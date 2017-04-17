@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 {-# OPTIONS -fno-warn-unused-do-bind #-}
 
 module Hirc.Connection.Managed
@@ -8,14 +10,11 @@ module Hirc.Connection.Managed
   , runManaged
   ) where
 
-import Prelude hiding (catch)
+import Prelude
 
 import Control.Concurrent
-import Control.Concurrent.MState
-import Control.Monad.Error
+import Control.Monad.Except
 import Control.Monad.Reader
-import Control.Monad.IO.Peel
-import Control.Exception.Peel
 
 import Hirc.Types
 import Hirc.Logging
@@ -31,20 +30,17 @@ runManaged ctid m = do
           , logSettingsM   = debugManagedSettings
           , managedThreads = ctid
           }
-    liftIO $ runReaderT (evalMState True (unManagedM $ startLogging >> m) defState) settings
-  where
-    defState :: ManagedState
-    defState = ManagedState
+    liftIO $ runReaderT (unManagedM $ startLogging >> m) settings
 
 --------------------------------------------------------------------------------
 -- Manage sessions
 
 runHircM :: MonadIO m => HircSettings -> HircM a -> m (Either HircError a)
-runHircM s (HircM r) = liftIO $
-  runErrorT (runReaderT (evalMState True (setState >> r) defState) s)
+runHircM s (HircM r) = liftIO $ runExceptT $ runReaderT r s
+  {-
  where
-  defState :: HircState
-  defState = HircState
+  defState :: HircSettings
+  defState = HircSettings
     { connectedHandle = Nothing
     , ircNickname     = ""
     , ircUsername     = ""
@@ -58,13 +54,16 @@ runHircM s (HircM r) = liftIO $
       , ircUsername = username h
       , ircRealname = realname h
       }
+  -}
 
+{-
 runHircWithSettings :: HircSettings -> HircM () -> ManagedM ()
 runHircWithSettings settings hirc = do
   merr <- runHircM settings hirc
   case merr of
        Left err -> handleHircError err settings hirc
        Right _  -> return ()
+-}
 
 
 -- | Start and manage new connections
@@ -87,11 +86,15 @@ manage eventLoop hirc = do
         , logSettingsH       = debugHircSettings srv
         , managedThreadsChan = tch
         }
-  tid <- forkM' $
-    runHircWithSettings settings (startLogging >> eventLoop `finally` shutdown)
+  tid <- liftIO . forkIO $ do
+    _ <- runHircM settings (startLogging >> eventLoop `finally'` shutdown)
+    return ()
   liftIO $ writeChan tch tid
   logM 1 $ "Managing new server: " ++ host srv ++ ":" ++ show (port srv)
  where
+  -- `finally` lifted to MonadError
+  finally' a b = a `catchError` (\_ -> b)
+
   shutdown = do
     logM 1 "Shutting down all modules…"
     onMods $ \(Module mm s) -> do
@@ -99,23 +102,26 @@ manage eventLoop hirc = do
       maybe (return ()) ($ s) (shutdownModule mm)
     logM 1 "Modules offline."
 
-  onMods :: ContainsHirc m
+  onMods :: (LogM m, MonadReader HircSettings m, MonadError HircError m)
          => (Module -> m ())
          -> m ()
-  onMods f = fmap runningModules getHircState
-         >>= mapM_ (\m -> f m `catch` moduleException m)
+  onMods f = do
+    mods <- asks (modules . runningHirc)
+    mapM_ (\m -> f m `catchError` moduleException m) mods
 
-  moduleException :: (LogM m, MonadPeelIO m) => Module -> SomeException -> m ()
+  moduleException :: LogM m => Module -> HircError -> m ()
   moduleException (Module mm _) e = do
     logM 1 $ "Module exception in \"" ++ moduleName mm ++ "\": " ++ show e
 
 --------------------------------------------------------------------------------
 -- Error handling
 
+{-
 handleHircError :: HircError
                 -> HircSettings
                 -> HircM ()
                 -> ManagedM ()
+-}
 
 {-
 handleHircError H_ConnectionLost s hirc = do
@@ -155,5 +161,7 @@ handleHircError H_ConnectionLost s hirc = do
        in settings { server = newSrv }
 -}
 
+{-
 handleHircError e _ _ = do
   logM 1 $ "Unknown error caught: " ++ show e
+-}

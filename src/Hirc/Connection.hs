@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Hirc.Connection
     (
@@ -17,15 +18,22 @@ module Hirc.Connection
     ) where
 
 
-import Prelude hiding (catch)
+import Prelude
 
-import Control.Applicative
+--import Control.Applicative
+import Control.Exception
 import Control.Concurrent
-import Control.Concurrent.MState
-import Control.Exception.Peel
+import Control.Concurrent.STM
 import Control.Monad
+import Control.Monad.Except
 import Control.Monad.Reader
-import Control.Monad.Error
+--import Data.Foldable
+--import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as B8
+import Data.Text (Text)
+--import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import Network
 import Network.IRC
 import System.IO
@@ -40,36 +48,59 @@ stdReconnect t = Reconnect t 0 (60 * 60 * 1) Nothing
 
 -- | Connect to a IRC server, returns two functions. The first one will return
 -- incoming messages, the second will handle commands
-connect :: UserName     -- ^ nick
-        -> UserName     -- ^ user
-        -> UserName     -- ^ realname
+connect :: String     -- ^ nick
+        -> String     -- ^ user
+        -> String     -- ^ realname
         -> HircM ()
 connect nick' user' rn = do
 
-  srv <- asks $ server . runningHirc
-  h <- liftIO $
-    connectTo (host srv) (PortNumber (port srv)) `catch` \(_ :: IOException) -> do
-    error $ "Connection to \"" ++ host srv ++ ":" ++ show (port srv) ++ "\" failed."
-  liftIO $ do
-    hSetBuffering h LineBuffering
-    hSetBinaryMode h False
-    hSetEncoding h utf8
-  modifyHircState $ \s -> s { connectedHandle = Just h }
+  hrc <- ask
+  let srv = server (runningHirc hrc)
 
-  _ <- forkM' listenForMessages
-  _ <- forkM' receiveCommand
+  -- try to connect => catch exception if necessary
+  eh <- liftIO $
+    (Right `fmap` connectTo (host srv) (PortNumber (port srv))) `catchError` (return . Left)
 
-  sendCmd $ Send (nick nick')
-  sendCmd $ Send (user user' "*" "*" rn)
-  modifyHircState $ \s -> s
-    { ircNickname = nick'
-    , ircUsername = user'
-    , ircRealname = rn
-    }
+  case eh of
 
-  waitFor001
+    -- error during connection => rethrow error
+    Left e -> do
+      logM 1 $ "Connection to \"" ++ host srv ++ ":" ++ show (port srv) ++ "\" failed: " ++ show e
+      throwError H_ConnectionFailed
 
-  return ()
+    -- everything ok => store handle
+    Right h -> do
+
+      liftIO $ do
+
+        -- fix handle settings
+        hSetBuffering h LineBuffering
+        hSetBinaryMode h False
+        hSetEncoding h utf8
+
+        -- start workerthreads
+        listenTID <- forkIO $ listenForMessages hrc h
+        cmdTID    <- forkIO $ handleCommands    hrc h
+
+        -- store handle + thread IDs
+        atomically $ do
+          writeTVar (networkHandle  hrc) (Just h)
+          writeTVar (listenThreadId hrc) (Just listenTID)
+          writeTVar (cmdThreadId    hrc) (Just cmdTID)
+
+      -- send user information to server
+      sendCmd $ Send (nick (B8.pack nick'))
+      sendCmd $ Send (user (B8.pack user') "*" "*" (B8.pack rn))
+
+      -- store user information
+      liftIO $ atomically $ do
+        writeTVar (nickname $ runningHirc hrc) nick'
+        writeTVar (username $ runningHirc hrc) user'
+        writeTVar (realname $ runningHirc hrc) rn
+
+      -- wait for OK from IRC server
+      waitFor001
+
  where
   -- Wait for the 001 message before "giving away" our connection
   waitFor001 :: HircM ()
@@ -82,9 +113,9 @@ connect nick' user' rn = do
 
 -- Sending/receiving commands/messages
 
-sendCmd :: ContainsHirc m => ConnectionCommand -> m ()
+sendCmd :: ConnectionCommand -> HircM ()
 sendCmd c = do
-  cmd <- askHircSettings >>= return . cmdChan
+  cmd <- asks cmdChan
   liftIO $ writeChan cmd c
 
 getMsg :: HircM Message
@@ -92,82 +123,134 @@ getMsg = do
   msg <- asks msgChan
   liftIO $ readChan msg
 
-sendMsg :: Message -> HircM ()
-sendMsg m = requireHandle $ \h -> liftIO . hPutStrLn h $ encode m
+sendMsg :: Handle -> Message -> IO ()
+sendMsg h m = B8.hPutStrLn h $ encode m
 
 -- Wait for commands, execute them
-receiveCommand :: HircM ()
-receiveCommand = forever . requireHandle $ \h -> do
+handleCommands :: HircSettings -> Handle -> IO ()
+handleCommands hrc h = forever $ do
 
-  cmd <- asks cmdChan
-  c   <- liftIO $ readChan cmd
-  logM 3 $ "receiveCommand --- " ++ show c
+  c <- readChan (cmdChan hrc) `catch` (\BlockedIndefinitelyOnMVar -> shutdown)
   case c of
 
-       Send msg           -> sendMsg $ msg
-       PrivMsg to msg     -> sendMsg $ privmsg to msg
-       Notice to msg      -> sendMsg $ notice to msg
-       Join chan          -> sendMsg $ joinChan chan
-       Part chan          -> sendMsg $ part chan
-       Nick new           -> sendMsg $ nick new
+       Send msg           -> sendMsg h $ msg
+       PrivMsg to msg     -> sendMsg h $ privmsg (B8.pack to) (T.encodeUtf8 msg)
+       Notice  to msg     -> sendMsg h $ notice  to msg
+       Join chan          -> sendMsg h $ joinChan chan
+       Part chan          -> sendMsg h $ part chan
+       Nick new           -> sendMsg h $ nick (B8.pack new)
 
-       Ping               -> sendMsg $ Message Nothing "PING" []
-       Pong               -> sendMsg $ Message Nothing "PONG" []
+       Ping               -> sendMsg h $ Message Nothing "PING" []
+       Pong               -> sendMsg h $ Message Nothing "PONG" []
 
-       Quit msg           -> do
-         -- shutdown everything
-         sendMsg $ quit msg
-         liftIO $ hClose h
-         modifyHircState $ \s -> s { connectedHandle = Nothing }
-         -- error will (hopefully) get cought
-         throwError H_ConnectionLost
+       Quit msg           ->
+         sendMsg h (quit (T.encodeUtf8 <$> msg)) `finally` shutdown
+
+ where
+  shutdown = do
+
+    -- close handle
+    hClose h
+
+    -- lookup current thread IDs and reset state to Nothing
+    mlistenerTID <- liftIO $ atomically $ do
+      writeTVar (networkHandle hrc)  Nothing
+      writeTVar (cmdThreadId hrc)    Nothing
+      swapTVar  (listenThreadId hrc) Nothing
+
+    -- kill worker threads
+    case mlistenerTID of
+      Just listenerTID -> killThread listenerTID
+      Nothing          -> return ()
+
+    -- kill own thread
+    throw ThreadKilled
 
 mkMessage :: String -> [Parameter] -> Message
-mkMessage cmd params = Message Nothing cmd params
+mkMessage cmd params = Message Nothing (B8.pack cmd) params
 
-notice :: Nickname -> String -> Message
-notice t s = mkMessage "NOTICE" [t,s]
+notice :: Nickname -> Text -> Message
+notice n t = mkMessage "NOTICE" [B8.pack n, T.encodeUtf8 t]
 
 -- Listen on handle and put incoming messages to our Chan
-listenForMessages :: HircM ()
-listenForMessages = forever $ do
-  l <- safeGetLine
-  logM 3 $ "listenForMessage --- " ++ show l
-  case decode l of
-       Just m  -> do
-         msg <- asks msgChan
-         liftIO $ writeChan msg m
-       Nothing -> return () -- todo
+listenForMessages :: HircSettings -> Handle -> IO ()
+listenForMessages hrc h = forever $ do
 
-safeGetLine :: HircM String
+  bs <- BS.hGetLine h
+  case decode bs of
+
+    -- successful message decode
+    Just m -> do
+      liftIO $ writeChan (msgChan hrc) m
+
+    -- fallback TODO
+    _ -> return ()
+
+{-
+safeGetLine :: HircM (Maybe ByteString)
 safeGetLine = requireHandle $ \h ->
+
+  liftIO $ foldr
+    (\enc b -> tryEncoding enc h `catch` (\(_ :: SomeException) -> b))
+    (return Nothing)
+    [utf8, latin1, utf16, utf32]
+
+ where
+  tryEncoding encoding handle = do
+
+    let getEncodedLine = do
+          hSetEncoding handle encoding
+          hGetLine h
+        resetEncoding = do
+          hSetEncoding handle utf8
+
+    Just <$> getEncodedLine `finally` resetEncoding
+-}
+
+  {-
   catch (liftIO $ hGetLine h) $ \(e :: SomeException) -> do
     logM 1 $ "safeGetLine, exception: " ++ show e
     tryEncoding [latin1, utf16, utf32]
 
-tryEncoding :: [TextEncoding] -> HircM String
-tryEncoding (enc:r) = requireHandle $ \h ->
+tryEncoding :: [TextEncoding] -> HircM (Maybe String)
+tryEncoding (enc:r) = requireHandle $ \h -> do
+
+  -- IO block to attempt decoding
   let io = finally (do hSetEncoding h enc
                        hGetLine h)
                    (hSetEncoding h utf8)
-      logEnc = logM 1 $ "tryEncoding, successfully used encoding: \"" ++ show enc ++ "\""
-   in catch (liftIO io <* logEnc) $ \(e :: SomeException) -> do
-        logM 1 $ "tryEncoding, exception for \"" ++ show enc ++ "\": " ++ show e
-        tryEncoding r
+
+  -- run IO and catch exceptions
+  eline <- liftIO $ (Right `fmap` io) `catch` (return . Left)
+  case eline of
+    Right line -> do
+      -- show a message on successful decode
+      logM 1 $ "tryEncoding, successfully used encoding: \"" ++ show enc ++ "\""
+      return $ Just line
+    Left err -> do
+      logM 1 $ "tryEncoding, exception for \"" ++ show enc ++ "\": " ++ show e
+      tryEncoding r
 tryEncoding [] = requireHandle $ \h -> do
   logM 1 $ "tryEncoding failed, reset handle encoding to: \"" ++ show utf8 ++ "\""
   liftIO $ do
     hSetEncoding h utf8
     hGetLine h
+-}
 
 --
 -- Other
 --
 
+{-
 requireHandle :: (Handle -> HircM a)
               -> HircM a
 requireHandle hirc = do
-  mh <- gets connectedHandle
+
+  -- look up TVar value
+  nhtvar <- asks networkHandle
+  mh <- liftIO $ atomically $ readTVar nhtvar
+
   case mh of
        Just h  -> hirc h
        Nothing -> throwError H_NotConnected
+-}
