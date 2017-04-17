@@ -1,14 +1,12 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses,
-             UndecidableInstances, TypeFamilies #-}
+             UndecidableInstances, TypeFamilies, ConstraintKinds,
+             FlexibleContexts #-}
 {-# OPTIONS -fno-warn-orphans #-}
 
 module Hirc.Types.Instances where
 
-import Control.Concurrent.MState
-import Control.Monad.Error
-import Control.Monad.IO.Peel
+import Control.Monad.Except
 import Control.Monad.Reader
-import Control.Monad.Trans.Peel
 
 import Hirc.Types.Commands
 import Hirc.Types.Hirc
@@ -19,6 +17,7 @@ import Hirc.Types.Hirc
 --------------------------------------------------------------------------------
 -- Filter monad instances
 
+{-
 instance ContainsHirc HircM where
   askHircSettings = ask
   getHircState    = get
@@ -48,6 +47,7 @@ instance ContainsMessage (MState s MessageM) where
   localMessage f s = do
     k <- peel
     join $ lift $ local f (k s)
+-}
 
 --------------------------------------------------------------------------------
 -- X runs in Y
@@ -64,6 +64,7 @@ instance CanRun MessageM HircM where
 instance CanRun MessageM IO where
   runInside = lift . runInside
 
+{-
 instance CanRun (MState s MessageM) (MState s MessageM) where
   runInside = id
 instance CanRun (MState s MessageM) MessageM where
@@ -72,6 +73,7 @@ instance CanRun (MState s MessageM) HircM where
   runInside = lift . runInside
 instance CanRun (MState s MessageM) IO where
   runInside = lift . runInside
+-}
 
 
 --------------------------------------------------------------------------------
@@ -91,7 +93,7 @@ instance IsHircCommand m a => IsHircCommand m ([String] -> a) where
 
 -- monads
 
-type ModM s = MState s MessageM
+type ModM s = ReaderT s MessageM
 
 --instance (CanRun m m, IsHircCommand m a) => IsHircCommand m (m a) where
   --toCmd m    = HC_Run $ m >>= return . toCmd
@@ -129,9 +131,11 @@ instance LogM ManagedM where
   logChan     = asks logChanM
   logSettings = asks logSettingsM
 
+{-
 instance (LogM m) => LogM (MState s m) where
   logChan     = lift logChan
   logSettings = lift logSettings
+-}
 
 instance (LogM m) => LogM (ReaderT t m) where
   logChan     = lift logChan
@@ -141,6 +145,7 @@ instance (LogM m) => LogM (ReaderT t m) where
 --------------------------------------------------------------------------------
 -- Managed monad instances
 
+{-
 instance ContainsManaged ManagedM where
   getManagedState = get
   askManagedSettings = ask
@@ -148,21 +153,4 @@ instance ContainsManaged ManagedM where
 --instance ContainsManaged HircM where
   --getManagedState = lift get
   --askManagedSettings = lift ask
-
---------------------------------------------------------------------------------
--- Forkable instances
-
-instance MonadPeelIO m => Forkable (MState t m) where
-  forkM'  = forkM
-  forkM_' = forkM_
-  waitM'  = waitM
-
-instance Forkable HircM where
-  forkM'  (HircM t) = HircM $ forkM t
-  forkM_' (HircM t) = HircM $ forkM_ t
-  waitM'  t         = HircM $ waitM t
-
-instance Forkable ManagedM where
-  forkM'  (ManagedM t) = ManagedM $ forkM t
-  forkM_' (ManagedM t) = ManagedM $ forkM_ t
-  waitM'  t            = ManagedM $ waitM t
+-}

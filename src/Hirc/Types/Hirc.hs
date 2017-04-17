@@ -1,15 +1,14 @@
 {-# LANGUAGE TypeSynonymInstances, MultiParamTypeClasses, RankNTypes,
-             TypeFamilies, GADTs #-}
+             TypeFamilies, GADTs, FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Hirc.Types.Hirc where
 
 import Control.Applicative
 import Control.Concurrent
-import Control.Concurrent.MState
-import Control.Monad.IO.Peel
+import Control.Concurrent.STM
 import Control.Monad.Reader
-import Control.Monad.Error
+import Control.Monad.Except
 import Network.IRC
 import System.IO
 
@@ -22,30 +21,19 @@ type NickName = String
 --------------------------------------------------------------------------------
 -- The Hirc monad
 
-data Hirc = Hirc
-  { server        :: IrcServer
-  , channels      :: [Channel]
-  , nickname      :: String
-  , username      :: String
-  , realname      :: String
-  , modules       :: [Module]
-  }
-
+{-
 -- we need the error instance here!
 instance Error HircError where
   strMsg = H_Other
+-}
 
 newtype HircM a = HircM
-  { unHircM :: MState HircState (ReaderT HircSettings (ErrorT HircError IO)) a }
-  deriving ( Monad, MonadIO, MonadState HircState
-           , MonadReader HircSettings, MonadError HircError
-           , MonadPeelIO, Functor, Applicative, MonadPlus
+  { unHircM :: ReaderT HircSettings (ExceptT HircError IO) a }
+  deriving ( Monad, MonadIO
+           , Functor, Applicative
+           , MonadReader HircSettings
+           , MonadError HircError
            )
-
-class (LogM m, MonadPeelIO m, Functor m) => ContainsHirc m where
-  askHircSettings :: m HircSettings
-  getHircState    :: m HircState
-  modifyHircState :: (HircState -> HircState) -> m ()
 
 type EventLoop = HircM ()
 
@@ -58,8 +46,22 @@ data HircError
   | H_Other String
   deriving (Show, Eq)
 
+--instance Monoid HircError
+
+data Hirc = Hirc
+  { server        :: IrcServer
+  , channels      :: [Channel]
+  , nickname      :: TVar String
+  , username      :: TVar String
+  , realname      :: TVar String
+  , modules       :: [Module]
+  }
+
 data HircSettings = HircSettings
   { runningHirc        :: Hirc
+  , networkHandle      :: TVar (Maybe Handle)
+  , listenThreadId     :: TVar (Maybe ThreadId)
+  , cmdThreadId        :: TVar (Maybe ThreadId)
   , cmdChan            :: Chan ConnectionCommand
   , msgChan            :: Chan Message
   , errMVar            :: MVar HircError
@@ -68,6 +70,7 @@ data HircSettings = HircSettings
   , managedThreadsChan :: Chan ThreadId
   }
 
+{-
 data HircState = HircState
   { connectedHandle :: Maybe Handle
   , ircNickname     :: String
@@ -75,6 +78,7 @@ data HircState = HircState
   , ircRealname     :: String
   , runningModules  :: [Module]
   }
+-}
 
 
 --------------------------------------------------------------------------------
@@ -82,7 +86,7 @@ data HircState = HircState
 
 type MessageM = ReaderT Message HircM
 
-class ContainsHirc m => ContainsMessage m where
+class MonadReader HircSettings m => ContainsMessage m where
   getMessage :: m Message
   localMessage :: (Message -> Message) -> m a -> m a
 
@@ -95,7 +99,7 @@ class ContainsHirc m => ContainsMessage m where
 --
 -- > data MyModule = MyModule { initialState :: MyState }
 -- > data MyState  = MyState  { unMyState :: Int }
--- 
+--
 -- Then you'll need the `IsModule' instance definition, here we're using the
 -- `AcidState' type to make our state persistent between sessions:
 --
@@ -106,7 +110,7 @@ class ContainsHirc m => ContainsMessage m where
 -- >   shutdownModule _ = Just closeAcidState
 -- >   onStartup      _ = Nothing
 -- >   onMessage      _ = Just myOnMessage
--- 
+--
 -- Make sure to define the necessary Acid types and instances if you want to use
 -- this persistent data storage system:
 --
@@ -131,8 +135,8 @@ class ContainsHirc m => ContainsMessage m where
 data Module where
   Module :: IsModule m => m -> ModuleState m -> Module
 
-type ModuleM        m a = MState (ModuleState m) HircM    a
-type ModuleMessageM m a = MState (ModuleState m) MessageM a
+type ModuleM        m a = ReaderT (TVar (ModuleState m)) HircM    a
+type ModuleMessageM m a = ReaderT (TVar (ModuleState m)) MessageM a
 
 -- | The main module class. The module runs in a `MState' environment with the
 -- `ModuleState m' type as state. For a persistent state see the section about
@@ -161,13 +165,11 @@ class IsModule m where
 -- The Managed monad
 
 newtype ManagedM a = ManagedM
-  { unManagedM :: MState ManagedState (ReaderT ManagedSettings IO) a }
-  deriving ( Monad, MonadIO , MonadPeelIO, Functor, Applicative
-           , MonadState ManagedState, MonadReader ManagedSettings
+  { unManagedM :: ReaderT ManagedSettings IO a }
+  deriving ( Monad, MonadIO, Functor, Applicative, Alternative
+           , MonadReader ManagedSettings
            , MonadPlus
            )
-
-data ManagedState = ManagedState
 
 data ManagedSettings = ManagedSettings
   { logChanM       :: Chan (Int,String)
@@ -175,14 +177,10 @@ data ManagedSettings = ManagedSettings
   , managedThreads :: Chan ThreadId
   }
 
-class ContainsManaged m where
-  getManagedState    :: m ManagedState
-  askManagedSettings :: m ManagedSettings
-
 --------------------------------------------------------------------------------
 -- Logging
 
-class MonadPeelIO m => LogM m where
+class MonadIO m => LogM m where
   logChan     :: m (Chan (Int,String))
   logSettings :: m LogSettings
 
@@ -198,11 +196,3 @@ data LogSettings = LogSettings
 
 class (Monad m, Monad f) => CanRun m f where
   runInside :: f a -> m a
-
---------------------------------------------------------------------------------
--- Forkable class
-
-class Forkable m where
-  forkM'  :: MonadPeelIO m => m () -> m ThreadId
-  forkM_' :: MonadPeelIO m => m () -> m ()
-  waitM'  :: MonadPeelIO m => ThreadId -> m ()

@@ -1,6 +1,7 @@
 module Hirc.Types.Connection where
 
 import Data.Time
+import Data.Text (Text)
 import Network
 import Network.IRC
 
@@ -26,13 +27,13 @@ type Realname = String
 
 data ConnectionCommand
   = Send Message
-  | PrivMsg Nickname String  -- ^ private message
-  | Notice Nickname String
+  | PrivMsg Nickname Text  -- ^ private message
+  | Notice  Nickname Text
   | Join Channel
   | Part Channel
   | Nick Nickname
   | Ping
   | Pong
-  | Quit (Maybe String)
+  | Quit (Maybe Text)
   deriving Show
 
