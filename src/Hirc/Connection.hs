@@ -34,6 +34,7 @@ import qualified Data.ByteString.Char8 as B8
 import Data.Text (Text)
 --import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import Data.Function
 import Network
 import Network.IRC
 import System.IO
@@ -96,26 +97,29 @@ connect def@(IrcDefinition srv chans nick' user' rn) mlog = handle (return . Lef
     writeTVar lv (Just listenTID)
     writeTVar cv (Just cmdTID)
 
+  --
+  -- Initial interaction with IRC server
+  --
+
   -- give command to send user information to server
   sendCmd inst $ Send (nick (B8.pack nick'))
   sendCmd inst $ Send (user (B8.pack user') "*" "*" (B8.pack rn))
 
   -- Wait for the 001 message before "giving away" our connection
-  let waitFor001 = do
-        msg <- getMsg inst
-        logMaybeIO mlog 3 $ "waitFor001 --- " ++ show msg
-        case msg of
-          Message { msg_command = "001" } -> return ()
-          _                               -> waitFor001
-
-  waitFor001
+  fix $ \loop -> do
+    msg <- getMsg inst
+    logMaybeIO mlog 3 $ "waitFor001 --- " ++ show msg
+    case msg of
+      Message { msg_command = "001" } -> return ()
+      _                               -> loop
 
   -- send join commands for all channels
   mapM_ (sendCmd inst . Join) chans
 
   return $ Right inst
 
--- | Shutdown all of hirc, but do not kill own thread
+
+-- | Shutdown IRC instance, but do not kill own thread
 shutdown :: IrcInstance -> Maybe LogInstance -> IO ()
 shutdown inst mlog = do
 
