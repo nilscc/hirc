@@ -1,4 +1,3 @@
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Hirc.Connection
@@ -16,22 +15,13 @@ module Hirc.Connection
     , module Network.IRC
     ) where
 
-
-import Prelude
-
---import Control.Applicative
 import Control.Exception
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad
---import Control.Monad.Except
---import Control.Monad.Reader
---import Data.Foldable
---import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as B8
 import Data.Text (Text)
---import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Data.Function
 import Network
@@ -115,6 +105,10 @@ connect def@(IrcDefinition srv chans nick' user' rn) mlog = handle (return . Lef
   -- send join commands for all channels
   mapM_ (sendCmd inst . Join) chans
 
+  --
+  -- Return instance
+  --
+
   return $ Right inst
 
 
@@ -154,18 +148,28 @@ handleIrcCommands inst _mlog = forever $ do
   c <- readChan (cmdChan inst)
   case c of
 
-       Send msg           -> sendMsg inst $ msg
-       PrivMsg to msg     -> sendMsg inst $ privmsg (B8.pack to) (T.encodeUtf8 msg)
-       Notice  to msg     -> sendMsg inst $ notice  to msg
-       Join chan          -> sendMsg inst $ joinChan chan
-       Part chan          -> sendMsg inst $ part chan
-       Nick new           -> sendMsg inst $ nick (B8.pack new)
+       Send msg           -> sendMsg $ msg
+       PrivMsg to msg     -> sendMsg $ privmsg (B8.pack to) (T.encodeUtf8 msg)
+       Notice  to msg     -> sendMsg $ notice  to msg
+       Join chan          -> sendMsg $ joinChan chan
+       Part chan          -> sendMsg $ part chan
+       Nick new           -> sendMsg $ nick (B8.pack new)
 
-       Ping               -> sendMsg inst $ Message Nothing "PING" []
-       Pong               -> sendMsg inst $ Message Nothing "PONG" []
+       Ping               -> sendMsg $ Message Nothing "PING" []
+       Pong               -> sendMsg $ Message Nothing "PONG" []
 
        Quit msg           ->
-         sendMsg inst (quit (T.encodeUtf8 <$> msg)) `finally` throw ThreadKilled
+         sendMsg (quit (T.encodeUtf8 <$> msg)) `finally` throw ThreadKilled
+
+ where
+  -- | Send a message in current Hirc instance
+  sendMsg :: Message -> IO ()
+  sendMsg m = do
+
+    h <- atomically $ requireTVar (networkHandle inst)
+
+    -- send encoded message
+    B8.hPutStrLn h $ encode m
 
 -- Listen on handle and put incoming messages to our Chan
 listenForMessages :: IrcInstance -> Maybe LogInstance -> IO ()
@@ -183,6 +187,7 @@ listenForMessages inst mlog = forever $ do
     -- fallback TODO
     _ -> logMaybeIO mlog 1 $ "Could not decode bytestring: " ++ B8.unpack bs
 
+
 -------------------------------------------------------------------------------
 -- Helper functions
 
@@ -194,14 +199,7 @@ sendCmd inst c = writeChan (cmdChan inst) c
 getMsg :: IrcInstance -> IO Message
 getMsg inst = readChan (msgChan inst)
 
--- | Send a message in current Hirc instance
-sendMsg :: IrcInstance -> Message -> IO ()
-sendMsg inst m = do
-
-  h <- atomically $ requireTVar (networkHandle inst)
-
-  -- send encoded message
-  B8.hPutStrLn h $ encode m
+-- IRC messages
 
 mkMessage :: String -> [Parameter] -> Message
 mkMessage cmd params = Message Nothing (B8.pack cmd) params
