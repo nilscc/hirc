@@ -1,6 +1,7 @@
 .PHONY: all install run clean
 
-all: install
+#all: install
+all: fast
 
 install:
 	git rebase master production
@@ -13,3 +14,14 @@ run: install
 clean:
 	cabal clean
 	-rm hirc
+
+.PHONY: config build fast
+
+config:
+	cabal config
+
+build:
+	cabal build
+
+fast: build
+	./dist/build/hirc/hirc
