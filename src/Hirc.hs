@@ -7,19 +7,20 @@
             -fno-warn-missing-fields
             -fno-warn-unused-do-bind
             #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
 module Hirc
   ( -- requireHandle
 
     -- * Hirc types & functions
-    Hirc (..), newHirc
-  , run
+  --  Hirc (..), newHirc
+  --, run
   --, HircM
   --, HircError (..)
   --, HircState (..)
   --, HircSettings (..)
 
-  , getNickname, getUsername, getRealname, changeNickname
+    getNickname, getUsername, getRealname, changeNickname
 
     -- * Module types & functions
   , Module, newModule
@@ -33,7 +34,7 @@ module Hirc
   , done, doneAfter, getCurrentChannel
   , withNickname, withUsername, withNickAndUser, withServer, withParams
   , MessageM, HircM
-  , ContainsMessage (..), ContainsHirc (..)
+  , ContainsMessage (..)
   , IsHircCommand (..)
 
     -- * IRC types & functions
@@ -54,7 +55,6 @@ module Hirc
   , wait
 
     -- * Logging
-  , LogM (..)
   , LogSettings (..)
   , logM
 
@@ -67,31 +67,63 @@ module Hirc
 
   ) where
 
-import Prelude                      hiding (catch)
-
+import Data.ByteString.Char8 as B8 (pack, unpack)
 import Control.Concurrent
+    ( ThreadId, writeChan, threadDelay )
 import Control.Concurrent.MState
-import Control.Monad.IO.Peel
-import Control.Monad.Error
 import Control.Monad.Reader
 import Control.Exception.Peel
-import Data.Maybe
-import Text.Regex.Posix
+import Data.Maybe ( catMaybes )
+import Data.Text as T (pack)
+import Text.Regex.Posix ( (=~) )
 
 import Hirc.Acid
-import Hirc.Commands
+import Hirc.Commands ( userCommand )
 import Hirc.Connection
+    ( Message(..), Channel, stdReconnect, connect, sendCmd )
 import Hirc.Messages
-import Hirc.Logging
-import Hirc.Types
+    ( handleIncomingMessage,
+      done,
+      doneAfter,
+      getCurrentChannel,
+      onCommand,
+      withParams,
+      withNickname,
+      withUsername,
+      withNickAndUser,
+      withServer )
+import Hirc.Logging ( logMaybeIO )
+import Hirc.Types.Commands ( IsHircCommand(..) )
+import Hirc.Types.Connection
+    ( ConnectionCommand(Nick, PrivMsg, Part, Quit, Join, Pong, Notice),
+      Realname,
+      Username,
+      Nickname,
+      Reconnect(..),
+      IrcServer(..) )
+import Hirc.Types.Hirc
+    ( IsModule(..),
+      ModuleMessageM,
+      ModuleM,
+      Module(..),
+      ContainsMessage(..),
+      MessageM,
+      HircInstance(ircInstance, logInstance),
+      IrcDefinition(ircRealname, ircNickname, ircUsername),
+      HircDefinition(modules, server),
+      LogSettings(..),
+      HircError(H_ConnectionLost),
+      HircM, IrcInstance (currentNickname, currentUsername, currentRealname) )
 import Hirc.Utils
+import Control.Concurrent.STM (readTVarIO, atomically, readTVar, writeTVar)
 
 --------------------------------------------------------------------------------
 -- Hirc instances
 
+{- 
 -- | Create a new Hirc instance
-newHirc :: IrcServer -> [Channel] -> [Module] -> Hirc
-newHirc srv chs mods = Hirc
+newHirc :: IrcServer -> [Channel] -> [Module] -> HircInstance
+newHirc srv chs mods = HircInstance
   { server        = srv
   , channels      = chs
   , nickname      = "hirc"
@@ -108,12 +140,12 @@ run hircs = do
 
   let async UserInterrupt = do
         tids <- liftIO $ getChanContents ct
-        mapM_ (liftIO . (throwTo `flip` UserInterrupt)) tids
+        mapM_ (liftIO . (`throwTo` UserInterrupt)) tids
       async e = throw e
 
   handle async $ do
     runManaged ct $ mapM_ (manage defEventLoop) hircs
-
+-}
 
 --------------------------------------------------------------------------------
 -- Modules
@@ -126,9 +158,16 @@ newModule m = Module m undefined
 --------------------------------------------------------------------------------
 -- IRC stuff
 
+sendCmd' :: ContainsMessage m => ConnectionCommand -> m ()
+sendCmd' cmd = do
+  ti <- asks ircInstance
+  liftIO $ do
+    Just i <- readTVarIO ti
+    sendCmd i cmd
+
 -- | Reply in a query to the user of the current message
 whisper :: ContainsMessage m => String -> m ()
-whisper txt = withNickname $ \n -> sendCmd $ PrivMsg n txt
+whisper txt = withNickname $ \n -> sendCmd' $ PrivMsg n (T.pack txt)
 
 reply :: ContainsMessage m
       => (Either Nickname Channel -> m ())
@@ -140,38 +179,38 @@ reply m = withParams $ \[c,_] -> do
     withNickname $ m . Left
    else
     -- public message to channel
-    m (Right c)
+    m $ Right (B8.pack c)
 
 -- | Answer and add the nick in public channels
 answer :: ContainsMessage m => String -> m ()
 answer text =
   reply $
     either (\n ->
-             sendCmd $ PrivMsg n text)
+             sendCmd' $ PrivMsg n (T.pack text))
            (\c -> withNickname $ \n ->
-             sendCmd $ PrivMsg c (n ++ ": " ++ text))
+             sayIn c $ n ++ ": " ++ text)
 
 -- | Answer without prefix the nick in a public channel
-say :: ContainsMessage m => String -> m ()
+say :: String -> HircM ()
 say text =
   reply $ \to ->
-    sendCmd $ PrivMsg (either id id to) text
+    sendCmd' $ PrivMsg (either id B8.unpack to) (T.pack text)
 
-sayIn :: ContainsHirc m => Channel -> String -> m ()
-sayIn c text = sendCmd $ PrivMsg c text
+sayIn :: ContainsMessage m => Channel -> String -> m ()
+sayIn c text = sendCmd' $ PrivMsg (B8.unpack c) (T.pack text)
 
-joinChannel :: ContainsHirc m => Channel -> m ()
-joinChannel ch = sendCmd $ Join ch -- TODO: store current channels somewhere?
+joinChannel :: ContainsMessage m => Channel -> m ()
+joinChannel ch = sendCmd' $ Join ch -- TODO: store current channels somewhere?
 
-partChannel :: ContainsHirc m => Channel -> m ()
-partChannel ch = sendCmd $ Part ch
+partChannel :: ContainsMessage m => Channel -> m ()
+partChannel ch = sendCmd' $ Part ch
 
-sendNotice :: ContainsHirc m => Nickname -> String -> m ()
-sendNotice n s = sendCmd $ Notice n s
+sendNotice :: ContainsMessage m => Nickname -> String -> m ()
+sendNotice n s = sendCmd' $ Notice n (T.pack s)
 
 quitServer :: ContainsMessage m => Maybe String -- ^ optional quit message
            -> m ()
-quitServer mqmsg = sendCmd $ Quit mqmsg
+quitServer mqmsg = sendCmd' $ Quit (T.pack <$> mqmsg)
 
 
 
@@ -220,17 +259,24 @@ onNickChange m =
 --------------------------------------------------------------------------------
 -- Handling incoming messages
 
+logM :: ContainsMessage m => Int -> String -> m ()
+logM l m = do
+  tmi <- asks logInstance
+  liftIO $ do
+    mi <- readTVarIO tmi
+    logMaybeIO mi l m
+
 -- irc commands: join
-joinCmd :: ContainsHirc m => String -> m ()
+joinCmd :: ContainsMessage m => String -> m ()
 joinCmd chan = do
   logM 1 $ "Joining: \"" ++ chan ++ "\""
-  sendCmd $ Join chan
+  sendCmd' $ Join (B8.pack chan)
 
 -- irc commands: pong
-pongCmd :: ContainsHirc m => m ()
+pongCmd :: ContainsMessage m => m ()
 pongCmd = do
   logM 4 "PING? PONG!"
-  sendCmd Pong
+  sendCmd' Pong
 
 -- CTCP stuff
 isCTCP :: String -> Bool
@@ -243,29 +289,45 @@ handleCTCP :: ContainsMessage m => String -> m ()
 handleCTCP "\001VERSION\001" =
   withNickname $ \to -> do
     logM 2 $ "Sending CTCP VERSION reply to \"" ++ to ++ "\""
-    sendCmd $ Notice to "\001VERSION hirc v0.2\001"
+    sendCmd' $ Notice to (T.pack "\001VERSION hirc v0.2\001")
 
 handleCTCP t =
   logM 2 $ "Unhandled CTCP: " ++ t
 
 -- | Send a request to the server to change your own nickname.
-changeNickname :: ContainsHirc m => Nickname -> m ()
-changeNickname n = sendCmd $ Nick n
+changeNickname :: ContainsMessage m => Nickname -> m ()
+changeNickname n = sendCmd' $ Nick n
 
-setNickname :: ContainsHirc m => String -> m ()
-setNickname n = modifyHircState $ \s -> s { ircNickname = n }
+setNickname :: ContainsMessage m => String -> m ()
+setNickname n = do -- modifyHircState $ \s -> s { ircNickname = n }
+  ti <- asks ircInstance
+  liftIO . atomically $ do
+    Just i <- readTVar ti
+    writeTVar (currentNickname i) n
 
 -- | Get the your own nickname.
-getNickname :: ContainsHirc m => m String
-getNickname = getHircState >>= return . ircNickname
+getNickname :: ContainsMessage m => m String
+getNickname = do
+  ti <- asks ircInstance
+  liftIO . atomically $ do
+    Just i <- readTVar ti
+    readTVar $ currentNickname i
 
 -- | Get your own username. If there is a leading '~' it is discarded.
-getUsername :: ContainsHirc m => m String
-getUsername = getHircState >>= return . dropWhile (== '~') . ircUsername
+getUsername :: ContainsMessage m => m String
+getUsername = do
+  ti <- asks ircInstance
+  liftIO . atomically $ do
+    Just i <- readTVar ti
+    readTVar $ currentUsername i
 
 -- | Get your own realname.
-getRealname :: ContainsHirc m => m String
-getRealname = getHircState >>= return . ircRealname
+getRealname :: ContainsMessage m => m String
+getRealname = do
+  ti <- asks ircInstance
+  liftIO . atomically $ do
+    Just i <- readTVar ti
+    readTVar $ currentRealname i
 
 -- | Default event loop
 defEventLoop :: HircM ()
@@ -289,7 +351,7 @@ defEventLoop = do
   mods <- fmap catMaybes . forM mods_uninitialized $ \(Module mm _) ->
     catch ((Just . Module mm) `fmap` initModule mm)
           (\(e :: SomeException) -> do
-            logM 1 $ "Initialization of module \"" ++ (moduleName mm) ++ "\" failed:" ++ show e
+            logM 1 $ "Initialization of module \"" ++ moduleName mm ++ "\" failed:" ++ show e
             return Nothing)
 
   let logIOException (e :: IOException) = do

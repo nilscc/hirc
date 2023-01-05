@@ -4,10 +4,12 @@ module Hirc.Commands
   ( userCommand
   ) where
 
-import Network.IRC
+import Network.IRC ( Message(Message, msg_params) )
 
-import Hirc.Types
+import Hirc.Types.Commands ( IsHircCommand(..), HircCommand(..) )
+import Hirc.Types.Hirc ( ContainsMessage(localMessage) )
 import Hirc.Messages
+    ( onCommand, withParams, catchPatternException )
 
 
 --------------------------------------------------------------------------------

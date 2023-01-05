@@ -2,7 +2,6 @@
 
 module Hirc.Acid
   ( update, query
-  , runQuery
   , openLocalState, openLocalStateFrom, closeAcidState, createCheckpoint
     -- *** Re-exports
   , makeAcidic
@@ -11,13 +10,21 @@ module Hirc.Acid
   , module Data.SafeCopy
   ) where
 
-import Data.Acid hiding (update, query, openLocalState, openLocalStateFrom,
-                         closeAcidState, createCheckpoint)
+import Data.Acid
+    ( makeAcidic,
+      AcidState,
+      EventResult,
+      EventState,
+      IsAcidic,
+      Query,
+      QueryEvent,
+      Update,
+      UpdateEvent )
 import qualified Data.Acid as A
 
 import Data.SafeCopy
-import Data.Typeable
-import Control.Monad.State
+import Data.Typeable ( Typeable )
+import Control.Monad.State ( MonadIO(..), MonadState(get) )
 
 
 --------------------------------------------------------------------------------
@@ -53,12 +60,12 @@ query e = do
 -- >    [..]
 --
 -- in your `IsModule' instance.
-openLocalState :: (Typeable st, IsAcidic st, MonadIO m)
+openLocalState :: (Typeable st, IsAcidic st, MonadIO m, SafeCopy st)
                => st -> m (AcidState st)
 openLocalState i =
   liftIO $ A.openLocalState i
 
-openLocalStateFrom :: (Typeable st, IsAcidic st, MonadIO m)
+openLocalStateFrom :: (Typeable st, IsAcidic st, MonadIO m, SafeCopy st)
                    => FilePath -> st -> m (AcidState st)
 openLocalStateFrom fp i =
   liftIO $ A.openLocalStateFrom fp i

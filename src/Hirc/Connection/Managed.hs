@@ -13,12 +13,18 @@ module Hirc.Connection.Managed
 import Prelude
 
 --import Control.Concurrent
-import Control.Concurrent.STM
-import Control.Monad.Except
-import Control.Monad.Reader
+import Control.Concurrent.STM ( newTVarIO )
+import Control.Monad.Except ( MonadIO(..), runExceptT )
+import Control.Monad.Reader ( ReaderT(runReaderT) )
 
-import Hirc.Types
-import Hirc.Logging
+import Hirc.Types.Hirc
+    ( HircInstance(HircInstance),
+      LogInstance(LogInstance),
+      HircDefinition(server),
+      HircError,
+      HircM(HircM) )
+import Hirc.Logging ( debugHircSettings, startLogging )
+import Control.Concurrent (newChan)
 
 
 --------------------------------------------------------------------------------
@@ -43,8 +49,16 @@ runHircM def (HircM r) = liftIO $ do
 
   -- create new hirc instances
   ircInst <- newTVarIO Nothing
-  logInst <- newTVarIO . Just =<< startLogging (debugHircSettings (server def))
-  let inst = HircInstance def ircInst logInst
+
+  logThreadIdTVar <- newTVarIO Nothing
+  logChan_ <- newChan
+  let
+    logSet = debugHircSettings (server def)
+    logInst = LogInstance logSet logThreadIdTVar logChan_
+
+  startLogging logInst
+  logInstTVar <- newTVarIO $ Just logInst
+  let inst = HircInstance def ircInst logInstTVar
 
   -- run hirc monad
   runExceptT $ runReaderT r inst

@@ -4,16 +4,19 @@
 
 module Hirc.Types.Hirc where
 
-import Control.Applicative
-import Control.Concurrent
-import Control.Concurrent.STM
+import Control.Applicative ( Alternative )
+import Control.Concurrent ( ThreadId, Chan )
+import Control.Concurrent.STM ( TVar )
 import Control.Monad.Reader
-import Control.Monad.Except
-import Network.IRC
-import System.IO
+    ( MonadIO, MonadPlus, ReaderT(ReaderT), MonadReader )
+import Control.Monad.Except ( ExceptT, MonadError )
+import Network.Connection (Connection)
+import Network.IRC ( Message, Channel )
 
 import Hirc.Types.Connection
+    ( ConnectionCommand, Username, IrcServer )
 
+import Data.Kind (Type)
 
 type NickName = String
 
@@ -71,7 +74,7 @@ data IrcInstance = IrcInstance
   { ircDefinition       :: IrcDefinition
 
   -- IO & thread communication
-  , networkHandle       :: TVar (Maybe Handle)
+  , networkConnection   :: TVar (Maybe Connection)
   , listenThreadId      :: TVar (Maybe ThreadId)
   , cmdThreadId         :: TVar (Maybe ThreadId)
 
@@ -176,7 +179,7 @@ type ModuleMessageM m a = ReaderT (TVar (ModuleState m)) MessageM a
 -- `ModuleState m' type as state. For a persistent state see the section about
 -- the Acid state system.
 class IsModule m where
-  type ModuleState m :: *
+  type ModuleState m :: Type
 
   moduleName         :: m -> String
     -- ^ (Unique) module name.

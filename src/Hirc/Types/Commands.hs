@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, TypeSynonymInstances,
+{-# LANGUAGE ScopedTypeVariables, FlexibleInstances,
              MultiParamTypeClasses, GADTs #-}
 
 module Hirc.Types.Commands where

@@ -13,22 +13,26 @@ library
     ghc-options: -Wall
     hs-source-dirs: src
     build-depends:
-        base == 4.*,
-        mtl == 2.*,
-        containers == 0.*,
-        network == 2.*,
-        curl == 1.*,
-        time == 1.*,
-        directory == 1.*,
-        irc == 0.*,
-        mstate == 0.*,
-        monad-peel == 0.*,
-        regex-posix == 0.*,
-        tagsoup == 0.*,
-        utf8-string == 0.*,
-        random == 1.*,
-        safecopy == 0.*,
-        acid-state == 0.*
+        base,
+        mtl,
+        containers,
+        text,
+        network,
+        connection,
+        curl,
+        time,
+        directory,
+        irc,
+        mstate,
+        monad-peel,
+        regex-posix,
+        tagsoup,
+        utf8-string,
+        random,
+        safecopy,
+        acid-state,
+        stm,
+        bytestring
     exposed-modules:
         Hirc
     other-modules:
@@ -50,23 +54,23 @@ executable hirc
     hs-source-dirs: app
     main-is: Main.hs
     build-depends:
-        base == 4.*,
-        mtl == 2.*,
-        containers == 0.*,
-        network == 2.*,
-        curl == 1.*,
-        time == 1.*,
-        directory == 1.*,
-        irc == 0.*,
-        mstate == 0.*,
-        monad-peel == 0.*,
-        regex-posix == 0.*,
-        tagsoup == 0.*,
-        utf8-string == 0.*,
-        random == 1.*,
-        safecopy == 0.*,
-        acid-state == 0.*,
-        hirc == 0.*
+        base,
+        mtl,
+        containers,
+        network,
+        curl,
+        time,
+        directory,
+        irc,
+        mstate,
+        monad-peel,
+        regex-posix,
+        tagsoup,
+        utf8-string,
+        random,
+        safecopy,
+        acid-state,
+        hirc
 
 
 

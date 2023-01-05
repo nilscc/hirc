@@ -5,11 +5,11 @@
 
 module Hirc.Types.Instances where
 
-import Control.Monad.Except
-import Control.Monad.Reader
+import Control.Monad.Except ( MonadIO(liftIO), MonadTrans(lift) )
+import Control.Monad.Reader ( ReaderT )
 
-import Hirc.Types.Commands
-import Hirc.Types.Hirc
+import Hirc.Types.Commands ( IsHircCommand(..), HircCommand(..) )
+import Hirc.Types.Hirc ( CanRun(..), MessageM, HircM )
 
 
 

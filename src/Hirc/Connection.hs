@@ -16,21 +16,43 @@ module Hirc.Connection
     ) where
 
 import Control.Exception
+    ( IOException,
+      finally,
+      handle,
+      throw,
+      AsyncException(ThreadKilled) )
 import Control.Concurrent
+    ( newChan, readChan, writeChan, forkIO, killThread, myThreadId )
 import Control.Concurrent.STM
-import Control.Monad
+    ( atomically,
+      retry,
+      STM,
+      TVar,
+      newTVarIO,
+      readTVar,
+      writeTVar,
+      swapTVar )
+import Control.Monad ( forever, unless )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as B8
 import Data.Text (Text)
 import qualified Data.Text.Encoding as T
-import Data.Function
-import Network
+import Data.Function ( fix )
+import Network.Connection (initConnectionContext, connectTo, ConnectionParams (ConnectionParams), connectionClose, connectionGetLine, connectionPut)
 import Network.IRC
-import System.IO
 
-import Hirc.Types
+import Hirc.Types.Connection
+    ( ConnectionCommand(..),
+      Nickname,
+      Reconnect(Reconnect),
+      IrcServer(port, host) )
+import Hirc.Types.Hirc
+    ( LogInstance,
+      IrcInstance(IrcInstance, msgChan, cmdThreadId, listenThreadId,
+                  networkConnection, cmdChan),
+      IrcDefinition(IrcDefinition) )
 import Hirc.Connection.Managed
-import Hirc.Logging
+import Hirc.Logging ( logMaybeIO )
 
 requireTVar :: TVar (Maybe a) -> STM a
 requireTVar v = readTVar v >>= maybe retry return
@@ -45,12 +67,18 @@ connect :: IrcDefinition -> Maybe LogInstance -> IO (Either IOException IrcInsta
 connect def@(IrcDefinition srv chans nick' user' rn) mlog = handle (return . Left) $ do
 
   -- try to connect to server
-  h <- connectTo (host srv) (PortNumber (port srv))
+  ctxt <- initConnectionContext
+  h <- connectTo ctxt $ ConnectionParams
+    (host srv)
+    (port srv)
+    Nothing
+    Nothing
 
   -- fix handle settings
-  hSetBuffering  h LineBuffering
-  hSetBinaryMode h False
-  hSetEncoding   h utf8
+  -- TODO: how to use with Network.Connection ?
+  --hSetBuffering  h LineBuffering
+  --hSetBinaryMode h False
+  --hSetEncoding   h utf8
 
   --
   -- create instance object
@@ -116,22 +144,22 @@ connect def@(IrcDefinition srv chans nick' user' rn) mlog = handle (return . Lef
 shutdown :: IrcInstance -> Maybe LogInstance -> IO ()
 shutdown inst mlog = do
 
-  (mh, tids) <- atomically $ do
+  (mc, tids) <- atomically $ do
 
     -- get current handle
-    mh <- swapTVar (networkHandle inst) Nothing
+    mc <- swapTVar (networkConnection inst) Nothing
 
     -- get all worker thread IDs
     c  <- swapTVar (cmdThreadId inst)    Nothing
     l  <- swapTVar (listenThreadId inst) Nothing
     let tids = [ tid | Just tid <- [c,l]]
 
-    return (mh, tids)
+    return (mc, tids)
 
-  logMaybeIO mlog 3 $ "Shutting down IRC instance. Handle = " ++ show mh ++ ", Thread IDs = " ++ show tids
+  logMaybeIO mlog 3 $ "Shutting down IRC instance. Thread IDs = " ++ show tids
 
   -- close handle
-  maybe (return ()) hClose mh
+  maybe (return ()) connectionClose mc
 
   -- kill other worker threads (not own!)
   myTID <- myThreadId
@@ -166,19 +194,19 @@ handleIrcCommands inst _mlog = forever $ do
   sendMsg :: Message -> IO ()
   sendMsg m = do
 
-    h <- atomically $ requireTVar (networkHandle inst)
+    c <- atomically $ requireTVar (networkConnection inst)
 
     -- send encoded message
-    B8.hPutStrLn h $ encode m
+    connectionPut c $ encode m `BS.append` "\n"
 
 -- Listen on handle and put incoming messages to our Chan
 listenForMessages :: IrcInstance -> Maybe LogInstance -> IO ()
 listenForMessages inst mlog = forever $ do
 
   -- get current handle & output chan
-  h <- atomically $ requireTVar (networkHandle inst)
+  c <- atomically $ requireTVar (networkConnection inst)
 
-  bs <- BS.hGetLine h
+  bs <- connectionGetLine 10000 c
   case decode bs of
 
     -- successful message decode

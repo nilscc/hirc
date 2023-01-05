@@ -2,19 +2,22 @@
 
 module Hirc.Logging
   ( startLogging
-  , logIO
+  , logIO, logMaybeIO
     -- * Log settings
   , debugHircSettings
   , debugManagedSettings
   ) where
 
 import Control.Concurrent
-import Control.Concurrent.STM
-import Control.Monad
-import Data.Time
-import System.Directory
+    ( readChan, writeChan, forkIO, killThread )
+import Control.Concurrent.STM ( atomically, swapTVar )
+import Control.Monad ( forever, unless, forM_, when )
+import Data.Time ( getCurrentTime )
+import System.Directory ( createDirectory, doesDirectoryExist )
 
-import Hirc.Types
+import Hirc.Types.Connection ( IrcServer(port, host) )
+import Hirc.Types.Hirc
+    ( LogInstance(logThreadId, logSettings, logChan), LogSettings(..) )
 
 --
 -- Settings
@@ -49,6 +52,9 @@ logIO inst l s = do
   -- write msg to log chan
   writeChan (logChan inst) (l,f)
 
+logMaybeIO :: Maybe LogInstance -> Int -> String -> IO ()
+logMaybeIO minst l s = forM_ minst (\inst -> logIO inst l s)
+
 -- | Store all log messages in the \"logs\" directory
 startLogging :: LogInstance -> IO ()
 startLogging inst = do
@@ -76,6 +82,4 @@ startLogging inst = do
 
   -- store thread ID & kill old logging thread if necessary
   mOldTid <- atomically $ swapTVar (logThreadId inst) (Just tid)
-  case mOldTid of
-    Just oldTid -> killThread oldTid
-    Nothing     -> return ()
+  forM_ mOldTid killThread

@@ -5,27 +5,35 @@
 
 module Hirc.Messages where
 
-import Prelude hiding (catch)
-import Control.Concurrent.MState
-import Control.Monad
-import Control.Monad.Error
+import Control.Concurrent.MState ( mapMState )
+import Control.Monad ( when, MonadPlus(mzero) )
+import Control.Monad.Except
+    ( MonadTrans(lift) )
 import Control.Monad.Reader
-import Control.Monad.IO.Peel
+    ( ReaderT(runReaderT) )
+import Control.Monad.IO.Peel ( MonadPeelIO )
 import Control.Exception.Peel
+    ( PatternMatchFail(PatternMatchFail), handle )
 import qualified Network.IRC as IRC
 
-import Hirc.Connection
-import Hirc.Types
+import Hirc.Connection ( Prefix(NickName, Server), getMsg )
+import Hirc.Types.Connection ( Username, Nickname )
+import Hirc.Types.Hirc
+    ( ModuleMessageM,
+      ModuleM,
+      ContainsMessage(getMessage),
+      IrcDefinition(ircNickname) )
 
 
 handleIncomingMessage :: ModuleMessageM m () -> ModuleM m ()
 handleIncomingMessage m = do
   msg <- lift getMsg
-  mapMState (runReaderT `flip` msg)
-    (m `catchError` noMsgErr)
+  return ()
+  --mapMState (`runReaderT` msg)
+    --m --(m `catchError` noMsgErr)
  where
-  noMsgErr e | e == noMsg = return ()
-             | otherwise  = throwError e
+  --noMsgErr e | e == noMsg = return ()
+  --           | otherwise  = throwError e
 
 done :: MonadPlus m => m ()
 done = mzero

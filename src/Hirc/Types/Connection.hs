@@ -1,9 +1,9 @@
 module Hirc.Types.Connection where
 
-import Data.Time
+import Data.Time ( NominalDiffTime, UTCTime )
 import Data.Text (Text)
-import Network
-import Network.IRC
+import Network.Socket ( PortNumber )
+import Network.IRC ( Message, Channel )
 
 --------------------------------------------------------------------------------
 -- Connection
