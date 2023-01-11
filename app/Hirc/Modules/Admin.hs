@@ -31,12 +31,12 @@ runAdminModule = do
     userCommand $ \"admin" "part" channel    -> doneAfter $ requireAuth $ partChannel channel
     userCommand $ \"admin" "part"            -> doneAfter $ requireAuth $ maybe (return ()) partChannel currentChannel
     userCommand $ \"admin" "set" "nick" name -> requireAuth $ changeNickname name
-    userCommand $ \"admin" "help" "admin"    -> showHelp
+    userCommand $ \"admin" "help"            -> showHelp
 
 showHelp :: AdminM ()
 showHelp = do
   whisper "Admin module, available commands:"
-  whisper "  help admin         --   show this help"
+  whisper "  help               --   show this help"
   whisper "  auth <password>    --   authenticate as admin"
   whisper "  join <channel>     --   join new channel"
   whisper "  part [<channel>]   --   part either the current or the specified channel"

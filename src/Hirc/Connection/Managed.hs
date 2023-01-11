@@ -7,9 +7,6 @@ module Hirc.Connection.Managed
     runHircM
   , forkHircM
 
-    -- * Manage run and modules
-  , runModule
-
     -- * Running managed connections
   --   manage
   -- , runManaged
@@ -97,10 +94,6 @@ forkHircM m = do
     return (tid, res)
 
   
-
-runModule :: Module -> HircM a
-runModule (Module _mm _s) = undefined
-
 {-
 runHircWithSettings :: HircSettings -> HircM () -> ManagedM ()
 runHircWithSettings settings hirc = do

@@ -45,6 +45,7 @@ debugManagedSettings = LogSettings
 logIO :: LogInstance -> Int -> String -> IO ()
 logIO inst l s = do
 
+  print (l, s)
   -- add timestamp to log message
   now <- getCurrentTime
   let f = "(" ++ show now ++ ") " ++ s

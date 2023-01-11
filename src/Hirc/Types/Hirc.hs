@@ -7,7 +7,7 @@ module Hirc.Types.Hirc where
 
 import Control.Applicative ( Alternative )
 import Control.Concurrent ( ThreadId, Chan )
-import Control.Concurrent.STM ( TVar )
+import Control.Concurrent.STM ( TVar, TChan )
 import Control.Monad (MonadPlus)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader
@@ -73,7 +73,7 @@ data IrcInstance = IrcInstance
   , cmdThreadId         :: TVar (Maybe ThreadId)
 
   , cmdChan             :: Chan ConnectionCommand
-  , msgChan             :: Chan Message
+  , msgBroadcast        :: TChan Message
 
   -- IRC properties
   , currentChannels     :: TVar [ChannelName]

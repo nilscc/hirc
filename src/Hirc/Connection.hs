@@ -6,7 +6,6 @@ module Hirc.Connection
       createInstance
     , connect
     , sendCmd
-    , getMsg
 
       -- * Settings
     , stdReconnect
@@ -33,7 +32,7 @@ import Control.Concurrent.STM
       newTVarIO,
       readTVar,
       writeTVar,
-      swapTVar, readTVarIO )
+      swapTVar, readTVarIO, newBroadcastTChan, newBroadcastTChanIO, dupTChan, readTChan, writeTChan )
 import Control.Monad ( forever, unless, when )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as B8
@@ -77,12 +76,12 @@ createInstance def@(IrcDefinition srv chans nick' user' rn) = do
   ctxt <- newTVarIO Nothing
   nc <- newTVarIO $ Nothing
   cc <- newChan -- commands
-  mc <- newChan -- messages
+  mc <- newBroadcastTChanIO -- messages
   lv <- newTVarIO Nothing -- listen worker thread ID
   cv <- newTVarIO Nothing -- command worker thread ID
 
   -- current IRC state
-  csv <- newTVarIO [] -- current channels
+  csv <- newTVarIO $ ircChannels def
   nv  <- newTVarIO nick'
   uv  <- newTVarIO user'
   rv  <- newTVarIO rn
@@ -95,7 +94,7 @@ createInstance def@(IrcDefinition srv chans nick' user' rn) = do
         listenThreadId = lv,
         cmdThreadId = cv,
         cmdChan = cc,
-        msgChan = mc,
+        msgBroadcast = mc,
         currentChannels = csv,
         currentNickname = nv,
         currentUsername = uv,
@@ -176,8 +175,9 @@ connect ircInstance mLogInstance = do
   sendCmd ircInstance $ Send (user (B8.pack user') "*" "*" (B8.pack real'))
 
   -- Wait for the 001 message before "giving away" our connection
+  msgChan <- atomically $ dupTChan (msgBroadcast ircInstance)
   fix $ \loop -> do
-    msg <- getMsg ircInstance
+    msg <- atomically $ readTChan msgChan
     logMaybeIO mLogInstance 3 $ "waitFor001 --- " ++ show msg
     case msg of
       Message { msg_command = "001" } -> return ()
@@ -232,7 +232,7 @@ handleIrcCommands inst _mlog = forever $ do
        Nick new           -> sendMsg $ nick (B8.pack new)
 
        Ping               -> sendMsg $ Message Nothing "PING" []
-       Pong               -> sendMsg $ Message Nothing "PONG" []
+       Pong params        -> sendMsg $ Message Nothing "PONG" (map B8.pack params)
 
        Quit msg           ->
          sendMsg (quit (T.encodeUtf8 <$> msg)) `finally` throw ThreadKilled
@@ -255,11 +255,10 @@ listenForMessages inst mlog = forever $ do
   c <- atomically $ requireTVar (networkConnection inst)
 
   bs <- connectionGetLine 10000 c
-  print bs
   case decode bs of
 
     -- successful message decode
-    Just m -> writeChan (msgChan inst) m
+    Just m -> atomically $ writeTChan (msgBroadcast inst) m
 
     -- fallback TODO
     _ -> logMaybeIO mlog 1 $ "Could not decode bytestring: " ++ B8.unpack bs
@@ -272,9 +271,6 @@ listenForMessages inst mlog = forever $ do
 
 sendCmd :: IrcInstance -> ConnectionCommand -> IO ()
 sendCmd inst = writeChan (cmdChan inst)
-
-getMsg :: IrcInstance -> IO Message
-getMsg inst = readChan (msgChan inst)
 
 -- IRC messages
 

@@ -34,7 +34,7 @@ data ConnectionCommand
   | Part ChannelName
   | Nick NickName
   | Ping
-  | Pong
+  | Pong [String]
   | Quit (Maybe Text)
   deriving Show
 

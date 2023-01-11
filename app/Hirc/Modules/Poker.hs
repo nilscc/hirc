@@ -71,10 +71,10 @@ runPokerModule = do -- Module "Poker" (Just updatePlayers) $ do
     -- userCommand $ \"poker" "quit"  -> quitGame
     -- userCommand $ \"poker" "leave" -> quitGame
 
-  {-
   userCommand $ \"players"        -> showPlayers        >> done
   userCommand $ \"pl"             -> showPlayers        >> done
 
+  {-
   userCommand $ \"turn"           -> showCurrentPlayer  >> done
   userCommand $ \"tu"             -> showCurrentPlayer  >> done
 
@@ -172,20 +172,27 @@ requireGame = do
   Just c <- getCurrentChannel
   Just g <- asks $ M.lookup c . game
   return g
+  -- case mg of
+  --   Nothing -> do
+  --     answer "No game in progress."
+  --     mzero
+  --   Just g -> return g
 
-{-
 showPlayers :: PokerM ()
 showPlayers = do
-  s <- load "state"
-  if s == Nothing || s == Just "end" then do
-     mps <- load "players"
-     case mps of
-         Just pls | not (nullMap pls) ->
-               say $ "Currently playing poker: " ++ intercalate ", " (elemsMap pls)
-         _ -> say "There is noone playing poker at the moment!"
-   else
-     showCurrentOrder
--}
+  logM 1 "Test"
+  g <- requireGame
+  answer $ "ok"
+
+  -- s <- load "state"
+  -- if s == Nothing || s == Just "end" then do
+  --    mps <- load "players"
+  --    case mps of
+  --        Just pls | not (nullMap pls) ->
+  --              say $ "Currently playing poker: " ++ intercalate ", " (elemsMap pls)
+  --        _ -> say "There is noone playing poker at the moment!"
+  --  else
+  --    showCurrentOrder
 
 {-
 showMoney :: MessageM ()

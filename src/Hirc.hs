@@ -77,7 +77,9 @@ import Control.Monad (when, forever, unless, forM, forM_, (>=>))
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import Control.Monad.Reader (runReaderT, ReaderT(..))
 import qualified Control.Monad.Reader as R
-import Control.Exception (AsyncException(..), throw, handle)
+import Control.Exception (AsyncException(..), throw, SomeException, IOException, PatternMatchFail, BlockedIndefinitelyOnSTM)
+import Control.Exception.Peel (handle, catch, finally)
+import Control.Monad.IO.Peel (MonadPeelIO(..))
 import Control.Monad.Error.Class (catchError, MonadError (throwError))
 import Data.Maybe ( catMaybes )
 import Data.Text as T (pack)
@@ -120,7 +122,7 @@ import Hirc.Types.Hirc
       IrcDefinition(..),
       LogDefinition,
       LogSettings(..),
-      IrcInstance (currentNickname, currentUsername, currentRealname, listenThreadId, cmdThreadId),
+      IrcInstance (currentNickname, currentUsername, currentRealname, listenThreadId, cmdThreadId, msgBroadcast),
       LogInstance (logThreadId),
       HircM,
       HircError (HircConnectionLost),
@@ -129,10 +131,11 @@ import Hirc.Types.Hirc
       ContainsLogInstance (askLogInstance) )
 import Hirc.Types.Instances () -- instances only
 import Hirc.Utils
-import Control.Concurrent.STM (readTVarIO, atomically, writeTVar, TChan, writeTChan, newTVarIO, newTChanIO, tryReadTChan, TMVar, takeTMVar, readTMVar)
+import Control.Concurrent.STM (readTVarIO, atomically, writeTVar, TChan, writeTChan, newTVarIO, newTChanIO, tryReadTChan, TMVar, takeTMVar, readTMVar, dupTChan)
 import Hirc.Connection.Managed (runHircM, forkHircM)
 import GHC.Conc.Sync (STM(STM))
 import Control.Monad.Fix (fix)
+import Hirc.Types (ContainsIrcInstance(askIrcInstance))
 
 --------------------------------------------------------------------------------
 -- Hirc instances
@@ -287,10 +290,10 @@ joinCmd chan = do
   sendCmd' $ Join chan
 
 -- irc commands: pong
-pongCmd :: (CanSend m, ContainsLogInstance m) => m ()
-pongCmd = do
-  logM 4 "PING? PONG!"
-  sendCmd' Pong
+pongCmd :: (CanSend m, ContainsLogInstance m) => [String] -> m ()
+pongCmd params = do
+  logM 4 $ "PING? PONG! " ++ show params
+  sendCmd' $ Pong params
 
 -- CTCP stuff
 isCTCP :: String -> Bool
@@ -341,7 +344,6 @@ defEventLoop chanThreadIds = do
   hircInst <- R.ask 
 
   -- start waiting for thread IDs
-
   liftIO $ do
     t1 <- forkIO $ atomically $ do
         ircInst <- awaitTVar (ircInstance hircInst)
@@ -360,19 +362,11 @@ defEventLoop chanThreadIds = do
       writeTChan chanThreadIds t2
       writeTChan chanThreadIds t3
 
-  ircInst <- askIrcInstance -- liftIO $ atomically . awaitTVar $ ircInstance hircInst
-  mLogInst <- askLogInstance -- liftIO $ readTVarIO $ logInstance hircInst
+  -- connect to IRC server
+  ircInst <- askIrcInstance
+  mLogInst <- askLogInstance
 
   liftIO $ connect ircInst mLogInst
-
-  -- connect to IRC server
-
-  --srv <- asks $ server . runningHirc
-  --logM 1 $ "Connected to: " ++ (host srv)
-
-  -- setup channels
-  -- chs <- asks $ channels . runningHirc
-  -- mapM_ joinCmd chs
 
   -- init modules
   modsUninitialized <- liftIO $ readTVarIO (modules hircInst)
@@ -396,33 +390,36 @@ defEventLoop chanThreadIds = do
 
 defaultModuleLoop :: Module -> HircM (ThreadId, TMVar (Either HircError ()))
 defaultModuleLoop (Module mm s) = do
-  --hircInst <- ask
 
   let 
-      logIOException :: (ContainsLogInstance m, MonadError HircError m) => HircError -> m ()
-      logIOException e = do
+      --logIOException :: (ContainsLogInstance m, MonadError HircError m) => HircError -> m ()
+      logIOException (e :: IOException) = do
         logM 1 $ "IO exception: " ++ show e
         throwError HircConnectionLost
-      -- logSTMException (e :: BlockedIndefinitelyOnSTM) = do
-      --   logM 1 $ "Blocked indefinitely on STM transaction: " ++ show e
-      --   throwError HircConnectionLost
-      -- logModuleException n (e :: SomeException) = do
-      --   logM 1 $ "Module exception in \"" ++ n ++ "\": " ++ show e
-      --   throwError e
+      logSTMException (e :: BlockedIndefinitelyOnSTM) = do
+        logM 1 $ "Blocked indefinitely on STM transaction: " ++ show e
+        throwError HircConnectionLost
+      logModuleException (e :: SomeException) = do
+        logM 1 $ "Exception: " ++ show e
+        --throwError e
 
-      --handleAll = handleError logIOException
-        -- . handleError (logModuleException 0)
-        -- . handleError logSTMException
+      handleAll :: (MonadPeelIO m, ContainsLogInstance m, MonadError HircError m) => m () -> m()
+      handleAll = handle logIOException
+                . handle logModuleException
+                . handle logSTMException
 
   ts <- liftIO $ newTVarIO s
   forkHircM $ runReaderT `flip` ts $ do
     -- run start up functions
     runMaybe $ onStartup mm
 
-    {- handleAll . -}
-    forever . handleIncomingMessage $ do
+    -- duplicate broadcast chan
+    ircInst <- askIrcInstance
+    msgChan <- liftIO $ atomically $ dupTChan (msgBroadcast ircInst)
 
-      onCommand "PING" pongCmd
+    handleAll . forever . handleIncomingMessage msgChan $ do
+
+      onCommand "PING" $ withParams pongCmd
 
       onCommand "NICK" $
         withNickAndUser $ \n u ->
@@ -442,7 +439,8 @@ defaultModuleLoop (Module mm s) = do
         -- run CTCP shit, this stuff is a TODO
         withParams $ \[_,text] ->
           when (isCTCP text) $ do
-            handleCTCP text `catchError` \e -> do
+            logM 2 $ "CTCP call: " ++ text
+            handleCTCP text `catch` \(e :: SomeException) -> do
               logM 1 $ "CTCP exception: " ++ show e
               return ()
             done

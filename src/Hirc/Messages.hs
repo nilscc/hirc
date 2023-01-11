@@ -20,21 +20,21 @@ import Hirc.Types.Hirc
     ( ModuleMessageM,
       ModuleM,
       ContainsMessage(getMessage),
-      IrcInstance (currentNickname, msgChan), ContainsIrcInstance (askIrcInstance), CanSend, HircInstance (ircInstance), MessageM (unMessageM) )
+      IrcInstance (currentNickname, msgBroadcast), ContainsIrcInstance (askIrcInstance), CanSend, HircInstance (ircInstance), MessageM (unMessageM) )
 import Hirc.Types.Instances ()
 import Control.Monad.Reader (mapReaderT, MonadReader (ask), ReaderT (runReaderT))
-import Control.Concurrent.STM (atomically, readTVarIO)
+import Control.Concurrent.STM (atomically, readTVarIO, TChan, readTChan)
 import qualified Data.ByteString.Char8 as B8
 import Control.Concurrent (readChan)
 import Control.Monad.Trans.Maybe (MaybeT(runMaybeT))
+import Hirc.Types (IrcInstance(msgBroadcast))
 
 
-handleIncomingMessage :: ModuleMessageM s () -> ModuleM s ()
-handleIncomingMessage m = do
+handleIncomingMessage :: TChan IRC.Message -> ModuleMessageM s () -> ModuleM s ()
+handleIncomingMessage msgChan m = do
 
   -- get next message from channel
-  ircInst <- askIrcInstance 
-  msg <- liftIO $ readChan $ msgChan ircInst
+  msg <- liftIO $ atomically $ readTChan msgChan
 
   -- run reader inside ModuleM
   _ <- mapReaderT (runMaybeT . (`runReaderT` msg) . unMessageM) m
