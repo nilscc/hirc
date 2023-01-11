@@ -13,6 +13,7 @@ import qualified Data.Map as M
 import qualified Data.ByteString.Char8 as B8
 
 import Control.Concurrent.STM (readTVarIO)
+import Control.Monad.IO.Class (MonadIO(..))
 
 import Hirc
 import Hirc.Modules.Admin.Acid
@@ -48,15 +49,11 @@ auth pw = withUsername $ \un -> do
   answer response
  where
   update' u = do
-    tvar <- ask
-    liftIO $ do
-      as <- readTVarIO tvar
-      AS.update as u
+    as <- ask
+    liftIO $ AS.update as u
   createCheckpoint' = do
-    tvar <- ask
-    liftIO $ do
-      as <- readTVarIO tvar
-      AS.createCheckpoint as
+    as <- ask
+    liftIO $ AS.createCheckpoint as
 
 requireAuth :: AdminM () -> AdminM ()
 requireAuth m = do
@@ -67,8 +64,7 @@ requireAuth m = do
        else answer "You don't have permission to do that."
  where
   query' q = do
-    tvar <- ask
-    as <- liftIO (readTVarIO tvar)
+    as <- ask
     liftIO $ AS.query as q
 
 --------------------------------------------------------------------------------

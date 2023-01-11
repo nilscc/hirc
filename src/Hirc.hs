@@ -23,6 +23,7 @@ module Hirc
   , IrcDefinition (..)
   --, LogDefinition
 
+  , ask, asks
   , getNickname, getUsername, getRealname, changeNickname
 
     -- * Module types & functions
@@ -71,8 +72,11 @@ module Hirc
 import Data.ByteString.Char8 as B8 (pack, unpack)
 import Control.Concurrent
     ( ThreadId, forkIO, throwTo )
+import Control.Concurrent.STM (TVar)
 import Control.Monad (when, forever, unless, forM, forM_, (>=>))
-import Control.Monad.Reader
+import Control.Monad.IO.Class (MonadIO(liftIO))
+import Control.Monad.Reader (runReaderT, ReaderT(..))
+import qualified Control.Monad.Reader as R
 import Control.Exception (AsyncException(..), throw, handle)
 import Control.Monad.Error.Class (catchError, MonadError (throwError))
 import Data.Maybe ( catMaybes )
@@ -162,6 +166,15 @@ run hircs = liftIO $ do
 newModule :: IsModule m => m -> Module
 newModule m = Module m undefined
 
+ask :: (IsModule s, MonadIO m) => ReaderT (TVar (ModuleState s)) m (ModuleState s)
+ask = do
+  tvar <- R.ask
+  liftIO $ readTVarIO tvar
+
+asks :: (IsModule s, MonadIO m)
+  => (ModuleState s -> a)
+  -> ReaderT (TVar (ModuleState s)) m a
+asks f = f <$> ask
 
 --------------------------------------------------------------------------------
 -- IRC stuff
@@ -325,7 +338,7 @@ getRealname = do
 -- | Default event loop
 defEventLoop :: TChan ThreadId -> HircM ()
 defEventLoop chanThreadIds = do
-  hircInst <- ask 
+  hircInst <- R.ask 
 
   -- start waiting for thread IDs
 

@@ -38,6 +38,7 @@ n0xy = IrcServer "irc.n0xy.net" 6697 (stdReconnect 3)
 defaultModules :: [Module]
 defaultModules =
   [ adminModule emptyAdminSettings { globalAdmins = ["McManiaC"] }
+  , pokerModule
   --, h3stModule
   --, urlTitlesModule
   --, testModule

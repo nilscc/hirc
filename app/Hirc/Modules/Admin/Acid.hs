@@ -4,9 +4,10 @@ module Hirc.Modules.Admin.Acid where
 
 import Data.Acid
 import Control.Monad.State
+import Control.Monad.Reader
 import qualified Data.Map as M
 
-import Hirc
+import Hirc hiding (ask, asks)
 
 type Password = String
 

@@ -1,12 +1,16 @@
-{-# LANGUAGE ScopedTypeVariables, PatternGuards, ViewPatterns #-}
+{-# LANGUAGE ScopedTypeVariables, PatternGuards, ViewPatterns, TypeFamilies #-}
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 
 module Hirc.Modules.Poker
   ( pokerModule
   ) where
 
+import Data.Time.Clock (UTCTime)
+import Control.Monad (mzero)
 import Control.Monad.State
 import Data.Maybe
+import Data.Map (Map)
+import qualified Data.Map as M
 import Data.List hiding (delete)
 import System.Random
 
@@ -28,26 +32,46 @@ smallBlind = 100
 --------------------------------------------------------------------------------
 -- The main module
 
-pokerModule :: Module
-pokerModule = Module "Poker" (Just updatePlayers) $ do
+data PokerModule = PokerModule
 
-  userCommand $ \"color" ->
-    let c1 = fullDeck !! 0
-        c2 = fullDeck !! 13
-        c3 = fullDeck !! 26
-        c4 = fullDeck !! 39
-     in answer $ intercalate " " (map colorCard [c1,c2,c3,c4])
+pokerModule :: Module
+pokerModule = newModule PokerModule
+
+data PokerState = PokerState
+  { game :: Map ChannelName Game
+  }
+
+initPokerState :: HircM PokerState
+initPokerState = return PokerState
+  { game = M.empty
+  }
+
+instance IsModule PokerModule where
+  type ModuleState PokerModule = PokerState
+  moduleName _ = "Poker"
+  initModule _ = initPokerState
+  shutdownModule _ = Nothing
+  onStartup _ = Nothing
+  onMessage _ = Just runPokerModule
+
+type PokerM a = ModuleMessageM PokerModule a
+
+runPokerModule :: PokerM ()
+runPokerModule = do -- Module "Poker" (Just updatePlayers) $ do
+
+  userCommand $ \"color" -> showColors >> done
 
   onValidPrefix $ do
 
     userCommand $ \"poker" "help"  -> showHelp
 
-    userCommand $ \"poker" "join"  -> acceptPlayers
-    userCommand $ \"poker" "start" -> acceptPlayers
+    -- userCommand $ \"poker" "join"  -> acceptPlayers
+    -- userCommand $ \"poker" "start" -> acceptPlayers
 
-    userCommand $ \"poker" "quit"  -> quitGame
-    userCommand $ \"poker" "leave" -> quitGame
+    -- userCommand $ \"poker" "quit"  -> quitGame
+    -- userCommand $ \"poker" "leave" -> quitGame
 
+  {-
   userCommand $ \"players"        -> showPlayers        >> done
   userCommand $ \"pl"             -> showPlayers        >> done
 
@@ -76,48 +100,57 @@ pokerModule = Module "Poker" (Just updatePlayers) $ do
   userCommand $ \"all" "in"       -> allIn              >> done
 
 -- On nickchange: update player names
-updatePlayers :: Username -> Nickname -> MessageM ()
+updatePlayers :: UserName -> NickName -> MessageM ()
 updatePlayers un nn = do
   updateAll "players" $ \_chan m ->
     if memberMap un m
        then insertMap un nn m
        else m
 
+  -}
+
 --------------------------------------------------------------------------------
 -- Types
 
--- data Player = Player
---   { playerName  :: String
---   , playerMoney :: Int
---   , playerPot   :: Int
---   , playerHand  :: Maybe Hand
---   }
---   deriving (Eq, Show)
--- 
--- data Game = Game
---   { players       :: [Player]
---   , player        :: Player
---   , currentPlayer :: Player
---   , history       :: [Action]
---   , blinds        :: (Int, Int) -- small/big blind
---   , currentState  :: GameState
---   , pot           :: Int
---   , sidePots      :: [([Player], Int)]
---   , deck          :: [Card]
---   , chatMessages  :: [(UTCTime, Player, String)]
---   , inputBuffer   :: [Char]
---   , inputMode     :: InputMode
---   }
---   deriving (Eq, Show)
+data Player = Player
+  { playerName  :: String
+  , playerMoney :: Int
+  , playerPot   :: Int
+  , playerHand  :: Maybe Hand
+  }
+  deriving (Eq, Show)
+
+data Game = Game
+  { players       :: [Player]
+  , player        :: Player
+  , currentPlayer :: Player
+  -- TODO: , history       :: [Action]
+  , blinds        :: (Int, Int) -- small/big blind
+  -- TODO: , currentState  :: GameState
+  , pot           :: Int
+  , sidePots      :: [([Player], Int)]
+  , deck          :: [Card]
+  , chatMessages  :: [(UTCTime, Player, String)]
+  , inputBuffer   :: [Char]
+  -- TODO: , inputMode     :: InputMode
+  }
+  deriving (Eq, Show)
 
 --type Poker a = MonadPeelIO m => MState Game m a
-
 
 --------------------------------------------------------------------------------
 -- Information
 
+showColors :: PokerM ()
+showColors = do
+  let c1 = fullDeck !! 0
+      c2 = fullDeck !! 13
+      c3 = fullDeck !! 26
+      c4 = fullDeck !! 39
+  answer $ intercalate " " (map colorCard [c1,c2,c3,c4])
+
 -- Help
-showHelp :: MessageM ()
+showHelp :: PokerM ()
 showHelp = do
   whisper "Playing Texas Hold'em, available commands are:"
   whisper "    <bot>: poker help         --   show this help"
@@ -134,7 +167,14 @@ showHelp = do
   whisper "    ca[rds]                   --   show your own and all community cards"
   whisper "    tu[rn]                    --   show whose turn it currently is"
 
-showPlayers :: MessageM ()
+requireGame :: PokerM Game
+requireGame = do
+  Just c <- getCurrentChannel
+  Just g <- asks $ M.lookup c . game
+  return g
+
+{-
+showPlayers :: PokerM ()
 showPlayers = do
   s <- load "state"
   if s == Nothing || s == Just "end" then do
@@ -145,13 +185,15 @@ showPlayers = do
          _ -> say "There is noone playing poker at the moment!"
    else
      showCurrentOrder
+-}
 
+{-
 showMoney :: MessageM ()
 showMoney = withUsername $ \u -> do
   wealth <- loadMoney u
   answer $ "Your current wealth is " ++ show wealth ++ "."
 
-loadMoney :: Username -> MessageM Integer
+loadMoney :: UserName -> MessageM Integer
 loadMoney u = do
   mmo <- loadGlobal "money"
   case mmo of
@@ -169,7 +211,8 @@ loadMoney u = do
                    singletonMap u startingMoney
          return startingMoney
 
-getCurrentOrder :: MessageM (Maybe [(Nickname, Username, Integer, Integer)])
+{ -
+getCurrentOrder :: MessageM (Maybe [(NickName, UserName, Integer, Integer)])
 getCurrentOrder = do
   mo <- load "order"
   case mo of
@@ -180,7 +223,7 @@ getCurrentOrder = do
          return $ Just $ zip4 nicks order mons pot
        _ -> return Nothing
 
-getPlayerNickname :: Username -> MessageM (Maybe Nickname)
+getPlayerNickname :: UserName -> MessageM (Maybe NickName)
 getPlayerNickname u = do
   mps <- load "players"
   return $
@@ -188,11 +231,11 @@ getPlayerNickname u = do
          Just ps -> lookupMap u ps
          _       -> Nothing
 
-getPlayerWealth :: Username -> MessageM (Maybe Integer)
+getPlayerWealth :: UserName -> MessageM (Maybe Integer)
 getPlayerWealth u = do
   loadGlobal "money" ~> u
 
-getPlayerPot :: Username -> MessageM (Maybe Integer)
+getPlayerPot :: UserName -> MessageM (Maybe Integer)
 getPlayerPot u = do
   load "pot" ~> u
 
@@ -202,7 +245,7 @@ getPotMax = do
  where
   getMax = maximum . elemsMap
 
-getAmountToCall :: Username -> MessageM Integer
+getAmountToCall :: UserName -> MessageM Integer
 getAmountToCall u = do
   mp <- getPlayerPot u
   mx <- getPotMax
@@ -245,7 +288,7 @@ showCurrentCards = withUsername $ \u -> do
   showCommunityCards
   showPlayerCards u
 
-showPlayerCards :: Username -> MessageM ()
+showPlayerCards :: UserName -> MessageM ()
 showPlayerCards u = do
   mn <- getPlayerNickname u
   mh <- getPlayerCards u
@@ -266,7 +309,7 @@ showCommunityCards = do
        _ ->
          say "There are no community cards yet."
 
-getPlayerCards :: Username -> MessageM (Maybe [Card])
+getPlayerCards :: UserName -> MessageM (Maybe [Card])
 getPlayerCards u = do
   mr <- load "hands" ~> u
   return $
@@ -324,7 +367,7 @@ startGame = withNickAndUser $ \n u -> do
 acceptPlayers :: MessageM ()
 acceptPlayers = withNickAndUser addPlayer
 
-addPlayer :: Nickname -> Username -> MessageM ()
+addPlayer :: NickName -> UserName -> MessageM ()
 addPlayer n u = do
   mps <- load "players"
   if maybe False (memberMap u) mps then
@@ -412,9 +455,9 @@ payBlinds = require "state" "preflop" $ do
   Just (n',u') <- getCurrentPlayer
   bet u' bigBlind
   say $ n' ++ " pays " ++ show bigBlind ++ " (big blind)."
-  store "last raise" ((Nothing :: Maybe Username), bigBlind)
+  store "last raise" ((Nothing :: Maybe UserName), bigBlind)
 
-bet :: Username -> Money -> MessageM ()
+bet :: UserName -> Money -> MessageM ()
 bet u m = do
   -- update total money of player
   updateGlobal "money" $ \mmo ->
@@ -465,7 +508,7 @@ raise (readsafe -> Just r) = requireCurrentPlayer $
     tc <- getAmountToCall u
     let tot = tc + r
     mx <- fromMaybe 0 `fmap` getPotMax
-    lr <- maybe 0 (snd :: (Maybe Username, Integer) -> Integer) `fmap` load "last raise"
+    lr <- maybe 0 (snd :: (Maybe UserName, Integer) -> Integer) `fmap` load "last raise"
     if pw >= tot && r >= lr then do
        say $ n ++ " raises the pot by " ++ show r ++ " to a total of " ++ show (mx+r) ++ "."
        bet u tot
@@ -520,7 +563,7 @@ requireCurrentPlayer m = withUsername $ \u -> do
 --------------------------------------------------------------------------------
 -- Organizing players & cards
 
-getCurrentPlayer :: MessageM (Maybe (Nickname, Username))
+getCurrentPlayer :: MessageM (Maybe (NickName, UserName))
 getCurrentPlayer = do
   mo <- load "order"
   mp <- load "players"
@@ -540,11 +583,11 @@ nextPlayer = do
    else do
      update "order" $ \mo ->
        case mo of
-           Just l | Just (f :: Username) <- headList l ->
+           Just l | Just (f :: UserName) <- headList l ->
                 appendList (tailList l) (singletonList f)
            _ -> emptyList -- shouldn't happen anyway
      mc  <- getCurrentPlayer
-     mlr <- load "last raise" :: MessageM (Maybe (Maybe Username, Money))
+     mlr <- load "last raise" :: MessageM (Maybe (Maybe UserName, Money))
      mgs <- load "round started by"
      let playerIsLastRaise    = fmap fst mlr == Just (fmap snd mc)
          playerHasStartedGame = Nothing == join (fmap fst mlr) && mgs == fmap snd mc
@@ -575,13 +618,13 @@ takeCard = do
 -- start round with first position player
 startFromFirstPosition :: MessageM ()
 startFromFirstPosition = do
-  Just (fp :: Username) <- load "first position"
+  Just (fp :: UserName) <- load "first position"
   store "round started by" fp
   let skip = do Just (_,cp) <- getCurrentPlayer
                 unless (cp == fp) (nextPlayer >> skip)
   skip
   update "last raise" $ \(Just (_,lr)) ->
-    ((Nothing :: Maybe Username), (lr :: Integer))
+    ((Nothing :: Maybe UserName), (lr :: Integer))
 
 flop :: MessageM ()
 flop = require "state" "preflop" $ do
@@ -653,3 +696,5 @@ readsafe s =
   case reads s of
        [(x,"")] -> Just x
        _        -> Nothing
+
+-}

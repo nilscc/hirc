@@ -29,6 +29,9 @@ executables:
       Hirc.Modules
       Hirc.Modules.Admin
       Hirc.Modules.Admin.Acid
+      Hirc.Modules.Poker
+      Hirc.Modules.Poker.Acid
+      Hirc.Modules.Poker.Cards
     dependencies:
       - hirc
       - base
@@ -37,3 +40,5 @@ executables:
       - acid-state
       - bytestring
       - stm
+      - random
+      - time
