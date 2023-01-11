@@ -3,7 +3,12 @@
 {-# OPTIONS -fno-warn-unused-do-bind #-}
 
 module Hirc.Connection.Managed
-  ( runHircM
+  ( -- * Manage and run HircM
+    runHircM
+  , forkHircM
+
+    -- * Manage run and modules
+  , runModule
 
     -- * Running managed connections
   --   manage
@@ -13,18 +18,22 @@ module Hirc.Connection.Managed
 import Prelude
 
 --import Control.Concurrent
-import Control.Concurrent.STM ( newTVarIO )
-import Control.Monad.Except ( MonadIO(..), runExceptT )
-import Control.Monad.Reader ( ReaderT(runReaderT) )
+import Control.Concurrent.STM ( newTVarIO, readTVar, STM, TVar, readTVarIO, newEmptyTMVarIO, atomically )
+import Control.Concurrent.STM.TMVar ( TMVar, putTMVar )
+import Control.Monad.IO.Class ( MonadIO(..) )
+import Control.Monad.Except ( runExceptT )
+import Control.Monad.Reader ( ReaderT(runReaderT), MonadReader (ask) )
 
 import Hirc.Types.Hirc
-    ( HircInstance(HircInstance),
-      LogInstance(LogInstance),
-      HircDefinition(server),
+    ( HircInstance(..),
+      LogInstance(..),
+      HircDefinition(..),
       HircError,
-      HircM(HircM) )
+      HircM(HircM, unHircM), IrcDefinition (ircServer), IrcInstance (listenThreadId, cmdThreadId), Module (Module) )
 import Hirc.Logging ( debugHircSettings, startLogging )
-import Control.Concurrent (newChan)
+import Control.Concurrent (newChan, ThreadId, forkIO)
+import Hirc.Connection (createInstance)
+import Data.Maybe (catMaybes)
 
 
 --------------------------------------------------------------------------------
@@ -41,46 +50,56 @@ runManaged ctid m = do
     liftIO $ runReaderT (unManagedM $ startLogging >> m) settings
 -}
 
+--runIrcInstance :: MonadIO m => IrcDefinition -> m IrcInstance
+--runIrcInstance def = do
+
 --------------------------------------------------------------------------------
 -- Manage sessions
 
 runHircM :: MonadIO m => HircDefinition -> HircM a -> m (Either HircError a)
 runHircM def (HircM r) = liftIO $ do
 
-  -- create new hirc instances
-  ircInst <- newTVarIO Nothing
+  -- prepare irc instance
+  let ircDef = ircDefinition def
+  ircInstTVar <- newTVarIO . Just =<< createInstance ircDef
 
+  -- setup logging
   logThreadIdTVar <- newTVarIO Nothing
-  logChan_ <- newChan
+  logChan' <- newChan
   let
-    logSet = debugHircSettings (server def)
-    logInst = LogInstance logSet logThreadIdTVar logChan_
+    logSet = debugHircSettings $ ircServer ircDef
+    logInst = LogInstance logSet logThreadIdTVar logChan'
 
   startLogging logInst
   logInstTVar <- newTVarIO $ Just logInst
-  let inst = HircInstance def ircInst logInstTVar
+
+  -- setup modules
+  modsTVar <- newTVarIO $ modulesDefinition def
+
+  -- create final hirc instance
+  let
+    inst = HircInstance {
+      modules = modsTVar,
+      ircInstance = ircInstTVar,
+      logInstance = logInstTVar }
 
   -- run hirc monad
   runExceptT $ runReaderT r inst
 
-  {-
- where
-  defState :: HircSettings
-  defState = HircSettings
-    { connectedHandle = Nothing
-    , ircNickname     = ""
-    , ircUsername     = ""
-    , ircRealname     = ""
-    , runningModules  = []
-    }
-  setState = do
-    h <- asks runningHirc
-    modify $ \hs -> hs
-      { ircNickname = nickname h
-      , ircUsername = username h
-      , ircRealname = realname h
-      }
-  -}
+forkHircM :: HircM a -> HircM (ThreadId, TMVar (Either HircError a))
+forkHircM m = do
+  h <- ask
+  liftIO $ do
+    res <- newEmptyTMVarIO
+    tid <- forkIO $ do
+      r <- runExceptT $ runReaderT (unHircM m) h
+      atomically $ putTMVar res r
+    return (tid, res)
+
+  
+
+runModule :: Module -> HircM a
+runModule (Module _mm _s) = undefined
 
 {-
 runHircWithSettings :: HircSettings -> HircM () -> ManagedM ()

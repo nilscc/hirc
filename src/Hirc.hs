@@ -1,7 +1,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MonoLocalBinds #-}
 
 {-# OPTIONS -fno-warn-incomplete-patterns
             -fno-warn-missing-fields
@@ -14,13 +14,16 @@ module Hirc
 
     -- * Hirc types & functions
   --  Hirc (..), newHirc
-  --, run
+    run
   --, HircM
   --, HircError (..)
   --, HircState (..)
   --, HircSettings (..)
+  , HircDefinition (..)
+  , IrcDefinition (..)
+  --, LogDefinition
 
-    getNickname, getUsername, getRealname, changeNickname
+  , getNickname, getUsername, getRealname, changeNickname
 
     -- * Module types & functions
   , Module, newModule
@@ -45,14 +48,14 @@ module Hirc
   , Reconnect (..)
   , stdReconnect
   --, ConnectionCommand (..)
-  , Channel
-  , Nickname
-  , Username
-  , Realname
+  , ChannelName
+  , NickName
+  , UserName
+  , RealName
 
     -- * Concurrency
-  , newThread
-  , wait
+  -- , newThread
+  -- , wait
 
     -- * Logging
   , LogSettings (..)
@@ -61,18 +64,17 @@ module Hirc
     -- * Other
   , module Hirc.Utils
 
-  , module Control.Concurrent.MState
   , module Control.Monad.Reader
-  , module Control.Exception.Peel
 
   ) where
 
 import Data.ByteString.Char8 as B8 (pack, unpack)
 import Control.Concurrent
-    ( ThreadId, writeChan, threadDelay )
-import Control.Concurrent.MState
+    ( ThreadId, forkIO, throwTo )
+import Control.Monad (when, forever, unless, forM, forM_, (>=>))
 import Control.Monad.Reader
-import Control.Exception.Peel
+import Control.Exception (AsyncException(..), throw, handle)
+import Control.Monad.Error.Class (catchError, MonadError (throwError))
 import Data.Maybe ( catMaybes )
 import Data.Text as T (pack)
 import Text.Regex.Posix ( (=~) )
@@ -80,7 +82,7 @@ import Text.Regex.Posix ( (=~) )
 import Hirc.Acid
 import Hirc.Commands ( userCommand )
 import Hirc.Connection
-    ( Message(..), Channel, stdReconnect, connect, sendCmd )
+    ( Message(..), Channel, stdReconnect, connect, sendCmd, awaitTVar )
 import Hirc.Messages
     ( handleIncomingMessage,
       done,
@@ -96,9 +98,10 @@ import Hirc.Logging ( logMaybeIO )
 import Hirc.Types.Commands ( IsHircCommand(..) )
 import Hirc.Types.Connection
     ( ConnectionCommand(Nick, PrivMsg, Part, Quit, Join, Pong, Notice),
-      Realname,
-      Username,
-      Nickname,
+      RealName,
+      UserName,
+      NickName,
+      ChannelName,
       Reconnect(..),
       IrcServer(..) )
 import Hirc.Types.Hirc
@@ -108,44 +111,48 @@ import Hirc.Types.Hirc
       Module(..),
       ContainsMessage(..),
       MessageM,
-      HircInstance(ircInstance, logInstance),
-      IrcDefinition(ircRealname, ircNickname, ircUsername),
-      HircDefinition(modules, server),
+      HircInstance(..),
+      HircDefinition(..),
+      IrcDefinition(..),
+      LogDefinition,
       LogSettings(..),
-      HircError(H_ConnectionLost),
-      HircM, IrcInstance (currentNickname, currentUsername, currentRealname) )
+      IrcInstance (currentNickname, currentUsername, currentRealname, listenThreadId, cmdThreadId),
+      LogInstance (logThreadId),
+      HircM,
+      HircError (HircConnectionLost),
+      ContainsIrcInstance (askIrcInstance),
+      CanSend,
+      ContainsLogInstance (askLogInstance) )
+import Hirc.Types.Instances () -- instances only
 import Hirc.Utils
-import Control.Concurrent.STM (readTVarIO, atomically, readTVar, writeTVar)
+import Control.Concurrent.STM (readTVarIO, atomically, writeTVar, TChan, writeTChan, newTVarIO, newTChanIO, tryReadTChan)
+import Hirc.Connection.Managed (runHircM, forkHircM)
+import GHC.Conc.Sync (STM(STM))
 
 --------------------------------------------------------------------------------
 -- Hirc instances
 
-{- 
--- | Create a new Hirc instance
-newHirc :: IrcServer -> [Channel] -> [Module] -> HircInstance
-newHirc srv chs mods = HircInstance
-  { server        = srv
-  , channels      = chs
-  , nickname      = "hirc"
-  , username      = "hirc"
-  , realname      = "hirc"
-  , modules       = mods
-  }
-
 -- | Run Hirc instances. Needs to be run in the main thread to make sure all
 -- modules get shut down correctly!   Otherwise: TODO
-run :: MonadPeelIO m => [Hirc] -> m ()
-run hircs = do
-  ct <- liftIO newChan
+run :: MonadIO m => [HircDefinition] -> m ()
+run hircs = liftIO $ do
+  ct <- newTChanIO
+  let
+    async UserInterrupt = liftIO $ do
+      tids <- atomically $ getTChanContents ct
+      mapM_ (`throwTo` UserInterrupt) tids
+    async e = throw e
 
-  let async UserInterrupt = do
-        tids <- liftIO $ getChanContents ct
-        mapM_ (liftIO . (`throwTo` UserInterrupt)) tids
-      async e = throw e
+  handle async $
+    mapM_ (`runHircM` defEventLoop ct) hircs
 
-  handle async $ do
-    runManaged ct $ mapM_ (manage defEventLoop) hircs
--}
+ where
+  getTChanContents :: TChan a -> STM [a]
+  getTChanContents tc = do
+    mval <- tryReadTChan tc
+    case mval of
+      Just val -> (val :) <$> getTChanContents tc
+      Nothing  -> return []
 
 --------------------------------------------------------------------------------
 -- Modules
@@ -158,20 +165,16 @@ newModule m = Module m undefined
 --------------------------------------------------------------------------------
 -- IRC stuff
 
-sendCmd' :: ContainsMessage m => ConnectionCommand -> m ()
+sendCmd' :: CanSend m => ConnectionCommand -> m ()
 sendCmd' cmd = do
-  ti <- asks ircInstance
-  liftIO $ do
-    Just i <- readTVarIO ti
-    sendCmd i cmd
+  i <- askIrcInstance
+  liftIO $ sendCmd i cmd
 
 -- | Reply in a query to the user of the current message
-whisper :: ContainsMessage m => String -> m ()
+whisper :: CanSend m => String -> m ()
 whisper txt = withNickname $ \n -> sendCmd' $ PrivMsg n (T.pack txt)
 
-reply :: ContainsMessage m
-      => (Either Nickname Channel -> m ())
-      -> m ()
+reply :: CanSend m => (Either NickName ChannelName -> m ()) -> m ()
 reply m = withParams $ \[c,_] -> do
   n <- getNickname
   if c == n then
@@ -179,10 +182,10 @@ reply m = withParams $ \[c,_] -> do
     withNickname $ m . Left
    else
     -- public message to channel
-    m $ Right (B8.pack c)
+    m $ Right c
 
 -- | Answer and add the nick in public channels
-answer :: ContainsMessage m => String -> m ()
+answer :: CanSend m => String -> m ()
 answer text =
   reply $
     either (\n ->
@@ -191,24 +194,24 @@ answer text =
              sayIn c $ n ++ ": " ++ text)
 
 -- | Answer without prefix the nick in a public channel
-say :: String -> HircM ()
+say :: CanSend m => String -> m ()
 say text =
   reply $ \to ->
-    sendCmd' $ PrivMsg (either id B8.unpack to) (T.pack text)
+    sendCmd' $ PrivMsg (either id id to) (T.pack text)
 
-sayIn :: ContainsMessage m => Channel -> String -> m ()
-sayIn c text = sendCmd' $ PrivMsg (B8.unpack c) (T.pack text)
+sayIn :: CanSend m => ChannelName -> String -> m ()
+sayIn c text = sendCmd' $ PrivMsg c (T.pack text)
 
-joinChannel :: ContainsMessage m => Channel -> m ()
+joinChannel :: CanSend m => ChannelName -> m ()
 joinChannel ch = sendCmd' $ Join ch -- TODO: store current channels somewhere?
 
-partChannel :: ContainsMessage m => Channel -> m ()
+partChannel :: CanSend m => ChannelName -> m ()
 partChannel ch = sendCmd' $ Part ch
 
-sendNotice :: ContainsMessage m => Nickname -> String -> m ()
+sendNotice :: CanSend m => NickName -> String -> m ()
 sendNotice n s = sendCmd' $ Notice n (T.pack s)
 
-quitServer :: ContainsMessage m => Maybe String -- ^ optional quit message
+quitServer :: CanSend m => Maybe String -- ^ optional quit message
            -> m ()
 quitServer mqmsg = sendCmd' $ Quit (T.pack <$> mqmsg)
 
@@ -219,7 +222,7 @@ quitServer mqmsg = sendCmd' $ Quit (T.pack <$> mqmsg)
 
 -- | Require prefixing user commands with the name of the bot (in a public
 -- channel)
-onValidPrefix :: (IsHircCommand m (m ()), ContainsMessage m) => m () -> m ()
+onValidPrefix :: (IsHircCommand m (String -> m ()), CanSend m) => m () -> m ()
 onValidPrefix wm =
   onCommand "PRIVMSG" $ withParams $ \[c,_] -> do
     myNick <- getNickname
@@ -228,10 +231,9 @@ onValidPrefix wm =
       wm
      else
       -- public channel with valid prefix
-      userCommand $ \(validPrefix myNick -> True) ->
-        wm
+      userCommand $ \(validPrefix myNick -> True) -> wm
  where
-  validPrefix :: Nickname -> String -> Bool
+  validPrefix :: NickName -> String -> Bool
   validPrefix n s = s =~ ("^" ++ escape n ++ "[:,.-\\!]?$")
 
   escape n = foldr esc "" n
@@ -244,8 +246,8 @@ onValidPrefix wm =
 
 -- | If a user changes his nick, the function receives the old nickname, the
 -- username and the new nickname as arguments.
-onNickChange :: ContainsMessage m
-             => (Nickname -> Username -> Nickname -> m ())
+onNickChange :: CanSend m
+             => (NickName -> UserName -> NickName -> m ())
              -> m ()
 onNickChange m =
   onCommand "NICK" $
@@ -259,21 +261,19 @@ onNickChange m =
 --------------------------------------------------------------------------------
 -- Handling incoming messages
 
-logM :: ContainsMessage m => Int -> String -> m ()
+logM :: ContainsLogInstance m => Int -> String -> m ()
 logM l m = do
-  tmi <- asks logInstance
-  liftIO $ do
-    mi <- readTVarIO tmi
-    logMaybeIO mi l m
+  mli <- askLogInstance
+  liftIO $ logMaybeIO mli l m
 
 -- irc commands: join
-joinCmd :: ContainsMessage m => String -> m ()
+joinCmd :: (CanSend m, ContainsLogInstance m) => String -> m ()
 joinCmd chan = do
   logM 1 $ "Joining: \"" ++ chan ++ "\""
-  sendCmd' $ Join (B8.pack chan)
+  sendCmd' $ Join chan
 
 -- irc commands: pong
-pongCmd :: ContainsMessage m => m ()
+pongCmd :: (CanSend m, ContainsLogInstance m) => m ()
 pongCmd = do
   logM 4 "PING? PONG!"
   sendCmd' Pong
@@ -284,7 +284,7 @@ isCTCP s = not (null s)
         && head s == '\001' 
         && last s == '\001'
 
-handleCTCP :: ContainsMessage m => String -> m ()
+handleCTCP :: (CanSend m, ContainsLogInstance m) => String -> m ()
 
 handleCTCP "\001VERSION\001" =
   withNickname $ \to -> do
@@ -295,89 +295,114 @@ handleCTCP t =
   logM 2 $ "Unhandled CTCP: " ++ t
 
 -- | Send a request to the server to change your own nickname.
-changeNickname :: ContainsMessage m => Nickname -> m ()
+changeNickname :: CanSend m => NickName -> m ()
 changeNickname n = sendCmd' $ Nick n
 
-setNickname :: ContainsMessage m => String -> m ()
-setNickname n = do -- modifyHircState $ \s -> s { ircNickname = n }
-  ti <- asks ircInstance
-  liftIO . atomically $ do
-    Just i <- readTVar ti
-    writeTVar (currentNickname i) n
+setNickname :: ContainsIrcInstance m => String -> m ()
+setNickname n = do
+  i <- askIrcInstance
+  liftIO . atomically $ writeTVar (currentNickname i) n
 
 -- | Get the your own nickname.
-getNickname :: ContainsMessage m => m String
+getNickname :: ContainsIrcInstance m => m String
 getNickname = do
-  ti <- asks ircInstance
-  liftIO . atomically $ do
-    Just i <- readTVar ti
-    readTVar $ currentNickname i
+  i <- askIrcInstance
+  liftIO . readTVarIO $ currentNickname i
 
 -- | Get your own username. If there is a leading '~' it is discarded.
-getUsername :: ContainsMessage m => m String
+getUsername :: ContainsIrcInstance m => m String
 getUsername = do
-  ti <- asks ircInstance
-  liftIO . atomically $ do
-    Just i <- readTVar ti
-    readTVar $ currentUsername i
+  i <- askIrcInstance
+  liftIO . readTVarIO $ currentUsername i
 
 -- | Get your own realname.
-getRealname :: ContainsMessage m => m String
+getRealname :: ContainsIrcInstance m => m String
 getRealname = do
-  ti <- asks ircInstance
-  liftIO . atomically $ do
-    Just i <- readTVar ti
-    readTVar $ currentRealname i
+  i <- askIrcInstance
+  liftIO . readTVarIO $ currentRealname i
 
 -- | Default event loop
-defEventLoop :: HircM ()
-defEventLoop = do
+defEventLoop :: TChan ThreadId -> HircM ()
+defEventLoop chanThreadIds = do
+  hircInst <- ask 
 
-  nn <- gets ircNickname
-  un <- gets ircUsername
-  rn <- gets ircRealname
+  -- start waiting for thread IDs
 
-  connect nn un rn
+  liftIO $ do
+    t1 <- forkIO $ atomically $ do
+        ircInst <- awaitTVar (ircInstance hircInst)
+        tid <- awaitTVar (listenThreadId ircInst)
+        writeTChan chanThreadIds tid
+    t2 <- forkIO $ atomically $ do
+        ircInst <- awaitTVar (ircInstance hircInst)
+        tid <- awaitTVar (cmdThreadId ircInst)
+        writeTChan chanThreadIds tid
+    t3 <- forkIO $ atomically $ do
+        logInst <- awaitTVar (logInstance hircInst)
+        tid <- awaitTVar (logThreadId logInst)
+        writeTChan chanThreadIds tid
+    atomically $ do
+      writeTChan chanThreadIds t1
+      writeTChan chanThreadIds t2
+      writeTChan chanThreadIds t3
+        
+  -- connect to IRC server
 
-  srv <- asks $ server . runningHirc
-  logM 1 $ "Connected to: " ++ (host srv)
+  ircInst <- liftIO $ atomically . awaitTVar $ ircInstance hircInst
+  mLogInst <- liftIO $ readTVarIO $ logInstance hircInst
+
+  liftIO $ connect ircInst mLogInst
+
+  --srv <- asks $ server . runningHirc
+  --logM 1 $ "Connected to: " ++ (host srv)
 
   -- setup channels
-  chs <- asks $ channels . runningHirc
-  mapM_ joinCmd chs
+  -- chs <- asks $ channels . runningHirc
+  -- mapM_ joinCmd chs
 
   -- init modules
-  mods_uninitialized <- asks $ modules . runningHirc
+  mods_uninitialized <- liftIO $ readTVarIO (modules hircInst)
   mods <- fmap catMaybes . forM mods_uninitialized $ \(Module mm _) ->
-    catch ((Just . Module mm) `fmap` initModule mm)
-          (\(e :: SomeException) -> do
-            logM 1 $ "Initialization of module \"" ++ moduleName mm ++ "\" failed:" ++ show e
-            return Nothing)
-
-  let logIOException (e :: IOException) = do
-        lift $ logM 1 $ "IO exception: " ++ show e
-        throwError H_ConnectionLost
-      logSTMException (e :: BlockedIndefinitelyOnSTM) = do
-        lift $ logM 1 $ "Blocked indefinitely on STM transaction: " ++ show e
-        throwError H_ConnectionLost
-      --logModuleException n (e :: SomeException) = do
-        --lift $ logM 1 $ "Module exception in \"" ++ n ++ "\": " ++ show e
-        --throwError e
-
-      handleAll = -- handle (logModuleException n)
-                  handle logIOException
-                . handle logSTMException
+    catchError (Just . Module mm <$> initModule mm) $ \e -> do
+      logM 1 $ "Initialization of module \"" ++ moduleName mm ++ "\" failed:" ++ show e
+      return Nothing
 
   -- fork off modules!
-  tids <- forM mods $ \(Module mm s) -> forkM' $ evalMState True `flip` s $ do
+  forM_ mods (defaultModuleLoop >=> liftIO . atomically . writeTChan chanThreadIds)
 
+  -- wait for modules
+  --mapM_ waitM' tids
+
+
+defaultModuleLoop :: Module -> HircM ThreadId
+defaultModuleLoop (Module mm s) = do
+  --hircInst <- ask
+
+  let 
+      logIOException :: (ContainsLogInstance m, MonadError HircError m) => HircError -> m ()
+      logIOException e = do
+        logM 1 $ "IO exception: " ++ show e
+        throwError HircConnectionLost
+      -- logSTMException (e :: BlockedIndefinitelyOnSTM) = do
+      --   logM 1 $ "Blocked indefinitely on STM transaction: " ++ show e
+      --   throwError HircConnectionLost
+      -- logModuleException n (e :: SomeException) = do
+      --   logM 1 $ "Module exception in \"" ++ n ++ "\": " ++ show e
+      --   throwError e
+
+      --handleAll = handleError logIOException
+        -- . handleError (logModuleException 0)
+        -- . handleError logSTMException
+
+  ts <- liftIO $ newTVarIO s
+  (tid, _) <- forkHircM $ runReaderT `flip` ts $ do
     -- run start up functions
     runMaybe $ onStartup mm
 
-    handleAll . forever . handleIncomingMessage $ do
+    {- handleAll . -}
+    forever . handleIncomingMessage $ do
 
-      onCommand "PING" $
-        pongCmd
+      onCommand "PING" pongCmd
 
       onCommand "NICK" $
         withNickAndUser $ \n u ->
@@ -397,15 +422,14 @@ defEventLoop = do
         -- run CTCP shit, this stuff is a TODO
         withParams $ \[_,text] ->
           when (isCTCP text) $ do
-            handleCTCP text `catch` \(e :: SomeException) ->
+            handleCTCP text `catchError` \e -> do
               logM 1 $ "CTCP exception: " ++ show e
+              return ()
             done
 
       -- pass message to module
       runMaybe $ onMessage mm
-
-  -- wait for modules
-  mapM_ waitM' tids
+  return tid
  where
   runMaybe (Just go) = go
   runMaybe _         = return ()
@@ -413,15 +437,16 @@ defEventLoop = do
 --------------------------------------------------------------------------------
 -- Concurrency
 
--- | Start a new thread and add it to the list of managed threads.
-newThread :: MessageM () -> MessageM ThreadId
-newThread m = do
-  r <- ask
-  tid <- lift $ forkM' (runReaderT m r :: HircM ())
-  tch <- lift $ asks managedThreadsChan
-  liftIO $ writeChan tch tid
-  return tid
-
-wait :: Int   -- ^ number of seconds
-     -> MessageM ()
-wait sec = liftIO $ threadDelay (sec * 1000000)
+-- -- | Start a new thread and add it to the list of managed threads.
+-- newThread :: MessageM () -> MessageM ThreadId
+-- newThread m = do
+--   r <- ask
+--   tid <- lift $ forkM' (runReaderT m r :: HircM ())
+--   tch <- lift $ asks managedThreadsChan
+--   liftIO $ writeChan tch tid
+--   return tid
+-- 
+-- wait :: Int   -- ^ number of seconds
+--      -> MessageM ()
+-- wait sec = liftIO $ threadDelay (sec * 1000000)
+-- 

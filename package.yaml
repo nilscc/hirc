@@ -1,0 +1,38 @@
+name: hirc
+version: 0.0.3
+
+library:
+  source-dirs: src
+  dependencies:
+    - base
+    - mtl >= 2.3.1
+    - transformers
+    - containers
+    - directory
+    - stm
+    - safecopy
+    - acid-state
+    - irc
+    - network
+    - connection
+    - text
+    - bytestring
+    - time
+    - regex-posix
+
+executables:
+  app:
+    source-dirs: app
+    main: Main.hs
+    other-modules:
+      Hirc.Modules
+      Hirc.Modules.Admin
+      Hirc.Modules.Admin.Acid
+    dependencies:
+      - hirc
+      - base
+      - mtl >= 2.3
+      - containers
+      - acid-state
+      - bytestring
+      - stm

@@ -1,15 +1,18 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
 module Hirc.Commands
   ( userCommand
   ) where
 
+import qualified Data.ByteString.Char8 as B8
 import Network.IRC ( Message(Message, msg_params) )
 
 import Hirc.Types.Commands ( IsHircCommand(..), HircCommand(..) )
-import Hirc.Types.Hirc ( ContainsMessage(localMessage) )
+import Hirc.Types.Hirc ( ContainsMessage(localMessage), CanSend )
 import Hirc.Messages
-    ( onCommand, withParams, catchPatternException )
+    ( onCommand, withParams )
 
 
 --------------------------------------------------------------------------------
@@ -41,24 +44,20 @@ import Hirc.Messages
 -- the top of your module files:
 --
 -- > {-# OPTIONS -fno-warn-incomplete-patterns #-}
-userCommand :: (ContainsMessage m, IsHircCommand m cmd)
-            => cmd
-            -> m ()
+userCommand :: (CanSend m, IsHircCommand m cmd) => cmd -> m ()
 userCommand cmd = onCommand "PRIVMSG" $ withParams $ \[_,text] ->
   runC (words text) (toCmd cmd)
 
-runC :: (ContainsMessage m) => [String] -> HircCommand m -> m ()
+runC :: (ContainsMessage m, MonadFail m) => [String] -> HircCommand m -> m ()
 runC wrds cmd = case cmd of
-
-  HC_Nothing   -> return ()
-  HC_Run h     -> h >>= runC wrds
-  HC_Lam f     -> 
+  HC_Nothing -> return ()
+  HC_Run h -> h >>= runC wrds
+  HC_Lam f -> 
     case wrds of
-         (w:ws) -> localMessage dropWord $ catchPatternException $
+         (w:ws) -> localMessage dropWord $
                      runC ws (f w)
          []     -> return ()
-  HC_Lams f    -> catchPatternException $
-                    runC [] $ f wrds
+  HC_Lams f -> runC [] $ f wrds
 
 
 --------------------------------------------------------------------------------
@@ -67,5 +66,5 @@ runC wrds cmd = case cmd of
 dropWord :: Message -> Message
 dropWord msg@Message { msg_params = ps } =
   case ps of
-       [c,t] -> msg { msg_params = [c, (unwords . drop 1 . words) t] }
+       [c,t] -> msg { msg_params = [c, B8.pack $ (unwords . drop 1 . words) (B8.unpack t)] }
        _     -> msg

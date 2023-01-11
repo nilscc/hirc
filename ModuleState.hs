@@ -18,7 +18,6 @@ module Hirc.ModuleState
 import Data.Maybe
 import Control.Monad
 import Control.Monad.Reader
-import Control.Concurrent.MState
 import qualified Data.Map as M
 
 import Hirc.Messages

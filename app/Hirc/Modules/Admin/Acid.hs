@@ -1,6 +1,9 @@
 {-# LANGUAGE PatternGuards, TemplateHaskell, TypeFamilies, DeriveDataTypeable #-}
+
 module Hirc.Modules.Admin.Acid where
 
+import Data.Acid
+import Control.Monad.State
 import qualified Data.Map as M
 
 import Hirc
@@ -8,8 +11,8 @@ import Hirc
 type Password = String
 
 data AdminSettings = AdminSettings
-  { globalAdmins  :: [Username]
-  , localAdmins   :: M.Map Channel [Username]
+  { globalAdmins  :: [UserName]
+  , localAdmins   :: M.Map ChannelName [UserName]
   , adminPassword :: Maybe String
   }
   deriving (Typeable)
@@ -18,14 +21,14 @@ data AdminSettings = AdminSettings
 --------------------------------------------------------------------------------
 -- ACID functions
 
-isAdmin :: Username -> Maybe Channel -> Query AdminSettings Bool
+isAdmin :: UserName -> Maybe ChannelName -> Query AdminSettings Bool
 isAdmin un mc = do
   as <- ask
   let ga = globalAdmins as
       la = localAdmins  as
   return $ un `elem` ga || un `elem` maybe [] (la M.!) mc
 
-authenticate :: Username -> Password -> Update AdminSettings String
+authenticate :: UserName -> Password -> Update AdminSettings String
 authenticate un pw = do
   as <- get -- adminPassword
   case adminPassword as of
@@ -38,7 +41,7 @@ authenticate un pw = do
            return "Incorrect password."
 
 {-
-authenticateLocal :: Username -> Channel -> Password -> Update AdminSettings (MessageM ())
+authenticateLocal :: Username -> ChannelName -> Password -> Update AdminSettings (MessageM ())
 authenticateLocal un ch pw = do
   mapw <- asks adminPassword
   case mapw of

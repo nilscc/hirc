@@ -1,39 +1,44 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses,
-             FunctionalDependencies #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts,
+   MultiParamTypeClasses, FunctionalDependencies #-}
 
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
 
 module Hirc.Messages where
 
-import Control.Concurrent.MState ( mapMState )
 import Control.Monad ( when, MonadPlus(mzero) )
-import Control.Monad.Except
-    ( MonadTrans(lift) )
-import Control.Monad.Reader
-    ( ReaderT(runReaderT) )
-import Control.Monad.IO.Peel ( MonadPeelIO )
-import Control.Exception.Peel
-    ( PatternMatchFail(PatternMatchFail), handle )
+import Control.Monad.Trans (MonadTrans(lift))
+import Control.Monad.IO.Class
+    ( MonadIO (liftIO) )
 import qualified Network.IRC as IRC
 
-import Hirc.Connection ( Prefix(NickName, Server), getMsg )
-import Hirc.Types.Connection ( Username, Nickname )
+import Hirc.Connection ( Prefix(NickName, Server), awaitTVar )
+import Hirc.Types.Connection ( UserName, NickName )
 import Hirc.Types.Hirc
     ( ModuleMessageM,
       ModuleM,
       ContainsMessage(getMessage),
-      IrcDefinition(ircNickname) )
+      IrcInstance (currentNickname, msgChan), ContainsIrcInstance (askIrcInstance), CanSend, HircInstance (ircInstance), MessageM (unMessageM) )
+import Hirc.Types.Instances ()
+import Control.Monad.Reader (mapReaderT, MonadReader (ask), ReaderT (runReaderT))
+import Control.Concurrent.STM (atomically, readTVarIO)
+import qualified Data.ByteString.Char8 as B8
+import Control.Concurrent (readChan)
+import Control.Monad.Trans.Maybe (MaybeT(runMaybeT))
 
 
-handleIncomingMessage :: ModuleMessageM m () -> ModuleM m ()
+handleIncomingMessage :: ModuleMessageM s () -> ModuleM s ()
 handleIncomingMessage m = do
-  msg <- lift getMsg
+
+  -- get next message from channel
+  ircInst <- askIrcInstance 
+  msg <- liftIO $ readChan $ msgChan ircInst
+
+  -- run reader inside ModuleM
+  _ <- mapReaderT (runMaybeT . (`runReaderT` msg) . unMessageM) m
   return ()
-  --mapMState (`runReaderT` msg)
-    --m --(m `catchError` noMsgErr)
- where
-  --noMsgErr e | e == noMsg = return ()
-  --           | otherwise  = throwError e
 
 done :: MonadPlus m => m ()
 done = mzero
@@ -45,14 +50,19 @@ doneAfter m = m >> done
 --------------------------------------------------------------------------------
 -- Filter
 
-getCurrentChannel :: ContainsMessage m => m (Maybe String)
+getCurrentChannel :: (ContainsMessage m, MonadFail m, ContainsIrcInstance m)
+  => m (Maybe String)
 getCurrentChannel = do
   msg <- getMessage
-  let cmd    = IRC.msg_command msg
-      (ch:_) = IRC.msg_params msg
-  me  <- ircNickname `fmap` getHircState
+  let cmd = B8.unpack $ IRC.msg_command msg
+      ((B8.unpack -> ch):_) = IRC.msg_params msg
+
+  -- get current nickname
+  ircInst <- askIrcInstance
+  nick <- liftIO $ readTVarIO (currentNickname ircInst)
+
   return $
-    if cmd == "PRIVMSG" && ch /= me then
+    if cmd == "PRIVMSG" && ch /= nick then
        Just ch
      else
        Nothing
@@ -62,53 +72,46 @@ onCommand :: (ContainsMessage m)
           -> m ()
           -> m ()
 onCommand c m = do
-  c' <- IRC.msg_command `fmap` getMessage
-  when (c == c') (m)
+  c' <- B8.unpack . IRC.msg_command <$> getMessage
+  when (c == c') m
 
 -- | All current message parameters, see `Message'
-withParams :: (ContainsMessage m)
+withParams :: CanSend m
            => ([String] -> m ())
            -> m ()
 withParams m = do
-  ps <- fmap IRC.msg_params getMessage
-  catchPatternException $ (m ps)
+  ps <- map B8.unpack . IRC.msg_params <$> getMessage
+  m ps
 
-withNickname :: (ContainsMessage m)
-             => (Nickname -> m ())
+withNickname :: CanSend m
+             => (NickName -> m ())
              -> m ()
-withNickname m = catchPatternException $ do
-  Just (NickName n _ _) <- fmap IRC.msg_prefix getMessage
-  (m n)
+withNickname m = do
+  Just (NickName (B8.unpack -> n) _ _) <- IRC.msg_prefix <$> getMessage
+  m n
 
 -- | Get the username of the current message. If there is a leading '~' it is
 -- discarded.
-withUsername :: (ContainsMessage m)
-             => (Username -> m ())
+withUsername :: CanSend m
+             => (UserName -> m ())
              -> m ()
-withUsername m = catchPatternException $ do
-  Just (NickName _ (Just u) _) <- fmap IRC.msg_prefix getMessage
-  (m $ dropWhile (== '~') u)
+withUsername m = do
+  Just (NickName _ (Just (B8.unpack -> u)) _) <- IRC.msg_prefix <$> getMessage
+  m $ dropWhile (== '~') u
 
-withNickAndUser :: (ContainsMessage m)
-                => (Nickname -> Username -> m ())
+withNickAndUser :: CanSend m
+                => (NickName -> UserName -> m ())
                 -> m ()
 withNickAndUser m = do
-  Just (NickName n (Just u) _) <- fmap IRC.msg_prefix getMessage
+  Just (NickName (B8.unpack -> n) (Just (B8.unpack -> u)) _) <- IRC.msg_prefix <$> getMessage
   m n (dropWhile (== '~') u)
 
-withServer :: (ContainsMessage m)
+withServer :: (ContainsMessage m, MonadFail m)
            => (String -> m ())
            -> m ()
-withServer m = catchPatternException $ do
-  Just p <- fmap IRC.msg_prefix getMessage
+withServer m = do
+  Just p <- IRC.msg_prefix <$> getMessage
   case p of
-       Server n              -> (m n)
-       NickName _ _ (Just n) -> (m n)
+       Server n              -> m $ B8.unpack n
+       NickName _ _ (Just n) -> m $ B8.unpack n
        _                     -> return ()
-
---------------------------------------------------------------------------------
--- Exceptions
-
-catchPatternException :: MonadPeelIO m => m () -> m ()
-catchPatternException =
-  handle $ \(PatternMatchFail _) -> return ()

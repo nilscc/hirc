@@ -1,38 +1,35 @@
 {-# LANGUAGE TypeSynonymInstances, MultiParamTypeClasses, RankNTypes,
              TypeFamilies, GADTs, FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
 
 module Hirc.Types.Hirc where
 
 import Control.Applicative ( Alternative )
 import Control.Concurrent ( ThreadId, Chan )
 import Control.Concurrent.STM ( TVar )
+import Control.Monad (MonadPlus)
+import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader
-    ( MonadIO, MonadPlus, ReaderT(ReaderT), MonadReader )
-import Control.Monad.Except ( ExceptT, MonadError )
-import Network.Connection (Connection)
+    ( ReaderT(ReaderT), MonadReader )
+import Control.Monad.Except ( ExceptT )
+import Control.Monad.Error.Class (MonadError)
+import Control.Exception (PatternMatchFail, IOException)
+import Data.Kind (Type)
+import Network.Connection (Connection, ConnectionContext)
 import Network.IRC ( Message, Channel )
 
 import Hirc.Types.Connection
-    ( ConnectionCommand, Username, IrcServer )
-
-import Data.Kind (Type)
-
-type NickName = String
-
+    ( ConnectionCommand, UserName, NickName, RealName, ChannelName, IrcServer )
+import Control.Monad.Trans.Maybe (MaybeT)
+import Control.Monad.RWS (MonadState)
 
 --------------------------------------------------------------------------------
 -- The Hirc monad
 
-{-
--- we need the error instance here!
-instance Error HircError where
-  strMsg = H_Other
--}
-
 newtype HircM a = HircM
   { unHircM :: ReaderT HircInstance (ExceptT HircError IO) a }
-  deriving ( Monad, MonadIO
+  deriving ( Monad, MonadIO, MonadFail
            , Functor, Applicative
            , MonadReader HircInstance
            , MonadError HircError
@@ -41,12 +38,12 @@ newtype HircM a = HircM
 type EventLoop = HircM ()
 
 data HircError
-  = H_NotConnected
-  | H_ConnectionLost
-  | H_ConnectionFailed
-  | H_NicknameAlreadyInUse NickName
-  | H_UsernameAlreadyInUse Username
-  | H_Other String
+  = HircNotConnected
+  | HircConnectionLost
+  | HircConnectionFailed
+  | HircNicknameAlreadyInUse NickName
+  | HircUsernameAlreadyInUse UserName
+  | HircOther String
   deriving (Show, Eq)
 
 --instance Monoid HircError
@@ -57,23 +54,19 @@ data LogSettings = LogSettings
   , logFile       :: FilePath
   }
 
-data HircDefinition = HircDefinition
-  { server        :: IrcServer
-  , modules       :: [Module]
-  }
-
 data IrcDefinition = IrcDefinition
   { ircServer           :: IrcServer
-  , ircChannels         :: [Channel]
+  , ircChannels         :: [ChannelName]
   , ircNickname         :: String
   , ircUsername         :: String
   , ircRealname         :: String
   }
 
 data IrcInstance = IrcInstance
-  { ircDefinition       :: IrcDefinition
+  { ircInstanceServer   :: IrcServer
 
   -- IO & thread communication
+  , connectionContext   :: TVar (Maybe ConnectionContext)
   , networkConnection   :: TVar (Maybe Connection)
   , listenThreadId      :: TVar (Maybe ThreadId)
   , cmdThreadId         :: TVar (Maybe ThreadId)
@@ -82,11 +75,13 @@ data IrcInstance = IrcInstance
   , msgChan             :: Chan Message
 
   -- IRC properties
-  , currentChannels     :: TVar [Channel]
-  , currentNickname     :: TVar String
-  , currentUsername     :: TVar String
-  , currentRealname     :: TVar String
+  , currentChannels     :: TVar [ChannelName]
+  , currentNickname     :: TVar NickName
+  , currentUsername     :: TVar UserName
+  , currentRealname     :: TVar RealName
   }
+
+type LogDefinition = LogSettings
 
 data LogInstance = LogInstance
   { logSettings         :: LogSettings
@@ -96,9 +91,13 @@ data LogInstance = LogInstance
   , logChan             :: Chan (Int,String)
   }
 
+data HircDefinition = HircDefinition
+  { modulesDefinition   :: [Module]
+  , ircDefinition       :: IrcDefinition
+  , logDefinition       :: LogDefinition
+  }
 data HircInstance = HircInstance
-  { hircDefinition      :: HircDefinition
-
+  { modules             :: TVar [Module]
   , ircInstance         :: TVar (Maybe IrcInstance)
   , logInstance         :: TVar (Maybe LogInstance)
 
@@ -107,26 +106,21 @@ data HircInstance = HircInstance
   --, managedThreadsChan  :: Chan ThreadId
   }
 
-{-
-data HircState = HircState
-  { connectedHandle :: Maybe Handle
-  , ircNickname     :: String
-  , ircUsername     :: String
-  , ircRealname     :: String
-  , runningModules  :: [Module]
-  }
--}
-
-
 --------------------------------------------------------------------------------
 -- Message filter monad
 
-type MessageM = ReaderT Message HircM
-
-class MonadReader HircInstance m => ContainsMessage m where
+class Monad m => ContainsMessage m where
   getMessage :: m Message
   localMessage :: (Message -> Message) -> m a -> m a
 
+class MonadIO m => ContainsIrcInstance m where
+  askIrcInstance :: m IrcInstance
+
+class MonadIO m => ContainsLogInstance m where
+  askLogInstance :: m (Maybe LogInstance)
+
+-- | Type alias for monads which can send IRC messages
+class (ContainsIrcInstance m, ContainsMessage m, MonadFail m) => CanSend m where
 
 --------------------------------------------------------------------------------
 -- Modules
@@ -172,14 +166,23 @@ class MonadReader HircInstance m => ContainsMessage m where
 data Module where
   Module :: IsModule m => m -> ModuleState m -> Module
 
-type ModuleM        m a = ReaderT (TVar (ModuleState m)) HircM    a
+type ModuleM m a = ReaderT (TVar (ModuleState m)) HircM a
+
+newtype MessageM a = MessageM { unMessageM :: ReaderT Message (MaybeT HircM) a }
+  deriving ( Monad, MonadIO, MonadFail
+           , MonadPlus, Alternative
+           , Functor, Applicative
+           , MonadReader Message
+           , MonadError HircError
+           )
+
 type ModuleMessageM m a = ReaderT (TVar (ModuleState m)) MessageM a
 
 -- | The main module class. The module runs in a `MState' environment with the
 -- `ModuleState m' type as state. For a persistent state see the section about
 -- the Acid state system.
 class IsModule m where
-  type ModuleState m :: Type
+  type ModuleState m = (s :: Type) | s -> m
 
   moduleName         :: m -> String
     -- ^ (Unique) module name.

@@ -3,7 +3,8 @@
 module Hirc.Connection
     (
       -- * Connection
-      connect
+      createInstance
+    , connect
     , sendCmd
     , getMsg
 
@@ -11,14 +12,15 @@ module Hirc.Connection
     , stdReconnect
 
       -- * Data types
-    , module Hirc.Connection.Managed
     , module Network.IRC
+
+      -- * Other
+    , requireTVar
+    , awaitTVar
     ) where
 
 import Control.Exception
-    ( IOException,
-      finally,
-      handle,
+    ( finally,
       throw,
       AsyncException(ThreadKilled) )
 import Control.Concurrent
@@ -31,31 +33,33 @@ import Control.Concurrent.STM
       newTVarIO,
       readTVar,
       writeTVar,
-      swapTVar )
-import Control.Monad ( forever, unless )
+      swapTVar, readTVarIO )
+import Control.Monad ( forever, unless, when )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as B8
 import Data.Text (Text)
 import qualified Data.Text.Encoding as T
 import Data.Function ( fix )
-import Network.Connection (initConnectionContext, connectTo, ConnectionParams (ConnectionParams), connectionClose, connectionGetLine, connectionPut)
+import Network.Connection (initConnectionContext, connectTo, ConnectionParams (ConnectionParams, connectionHostname, connectionPort, connectionUseSecure, connectionUseSocks), connectionClose, connectionGetLine, connectionPut)
 import Network.IRC
 
 import Hirc.Types.Connection
     ( ConnectionCommand(..),
-      Nickname,
+      NickName,
+      ChannelName,
       Reconnect(Reconnect),
       IrcServer(port, host) )
-import Hirc.Types.Hirc
-    ( LogInstance,
-      IrcInstance(IrcInstance, msgChan, cmdThreadId, listenThreadId,
-                  networkConnection, cmdChan),
-      IrcDefinition(IrcDefinition) )
-import Hirc.Connection.Managed
+import Hirc.Types.Hirc ( LogInstance(..), IrcInstance(..), IrcDefinition(..) )
+--import Hirc.Connection.Managed
 import Hirc.Logging ( logMaybeIO )
+import Data.Maybe (isNothing)
 
 requireTVar :: TVar (Maybe a) -> STM a
 requireTVar v = readTVar v >>= maybe retry return
+
+  -- wait until thread ID is set before doing anything
+awaitTVar :: TVar (Maybe a) -> STM a
+awaitTVar = requireTVar
 
 -- | Standard reconnect settings with 1 hours delay between retries
 stdReconnect :: Int -> Reconnect
@@ -63,29 +67,15 @@ stdReconnect t = Reconnect t 0 (60 * 60 * 1) Nothing
 
 -- | Connect to a IRC server, returns two functions. The first one will return
 -- incoming messages, the second will handle commands
-connect :: IrcDefinition -> Maybe LogInstance -> IO (Either IOException IrcInstance)
-connect def@(IrcDefinition srv chans nick' user' rn) mlog = handle (return . Left) $ do
-
-  -- try to connect to server
-  ctxt <- initConnectionContext
-  h <- connectTo ctxt $ ConnectionParams
-    (host srv)
-    (port srv)
-    Nothing
-    Nothing
-
-  -- fix handle settings
-  -- TODO: how to use with Network.Connection ?
-  --hSetBuffering  h LineBuffering
-  --hSetBinaryMode h False
-  --hSetEncoding   h utf8
-
+createInstance :: IrcDefinition -> IO IrcInstance
+createInstance def@(IrcDefinition srv chans nick' user' rn) = do
   --
   -- create instance object
   --
 
   -- IO & thread communication
-  hv <- newTVarIO $ Just h
+  ctxt <- newTVarIO Nothing
+  nc <- newTVarIO $ Nothing
   cc <- newChan -- commands
   mc <- newChan -- messages
   lv <- newTVarIO Nothing -- listen worker thread ID
@@ -97,47 +87,105 @@ connect def@(IrcDefinition srv chans nick' user' rn) mlog = handle (return . Lef
   uv  <- newTVarIO user'
   rv  <- newTVarIO rn
 
-  let inst = IrcInstance def hv lv cv cc mc csv nv uv rv
+  return
+    IrcInstance
+      { ircInstanceServer = ircServer def,
+        connectionContext = ctxt,
+        networkConnection = nc,
+        listenThreadId = lv,
+        cmdThreadId = cv,
+        cmdChan = cc,
+        msgChan = mc,
+        currentChannels = csv,
+        currentNickname = nv,
+        currentUsername = uv,
+        currentRealname = rv
+      }
+
+connect :: IrcInstance -> Maybe LogInstance -> IO ()
+connect ircInstance mLogInstance = do
+
+  --
+  -- Connect to server
+  --
+
+  -- check if connection context is already set, and create new one if not
+  mCtxt <- readTVarIO $ connectionContext ircInstance
+  when (isNothing mCtxt) $ do
+    ctxt <- initConnectionContext
+    atomically $ do
+      mCtxt' <- readTVar $ connectionContext ircInstance
+      unless (isNothing mCtxt') $ writeTVar (connectionContext ircInstance) (Just ctxt)
+
+  -- load connection context from instance
+  ctxt <- atomically $ requireTVar (connectionContext ircInstance)
+
+  -- define connection parameters
+  let ircServer = ircInstanceServer ircInstance
+      params = ConnectionParams {
+        connectionHostname = host ircServer,
+        connectionPort = port ircServer, 
+        connectionUseSecure = Nothing, -- TODO
+        connectionUseSocks = Nothing }
+
+  -- create connection
+  con <- connectTo ctxt params
+
+  -- store connection in instance
+  atomically $ writeTVar (networkConnection ircInstance) (Just con)
+
+  -- fix handle settings
+  -- TODO: how to use with Network.Connection ? necessary?
+  --hSetBuffering  h LineBuffering
+  --hSetBinaryMode h False
+  --hSetEncoding   h utf8
 
   --
   -- start workerthreads
   --
 
-  -- wait until thread ID is set before doing anything
-  let wait v = atomically $ requireTVar v
+  let wait = atomically . awaitTVar
 
-  listenTID <- forkIO $ wait lv >> listenForMessages inst mlog
-  cmdTID    <- forkIO $ wait cv >> handleIrcCommands inst mlog `finally` shutdown inst mlog
+  listenTID <- forkIO $ do
+    -- wait for thread to be setup properly
+    _ <- wait $ listenThreadId ircInstance
+    listenForMessages ircInstance mLogInstance
+
+  cmdTID <- forkIO $ do
+    -- wait for thread to be setup properly
+    _ <- wait $ cmdThreadId ircInstance
+    handleIrcCommands ircInstance mLogInstance `finally` shutdown ircInstance mLogInstance
 
   -- set worker thread IDs
   atomically $ do
-    writeTVar lv (Just listenTID)
-    writeTVar cv (Just cmdTID)
+    writeTVar (listenThreadId ircInstance) (Just listenTID)
+    writeTVar (cmdThreadId ircInstance) (Just cmdTID)
 
   --
   -- Initial interaction with IRC server
   --
 
+  -- get current nick and username
+  (nick', user', real') <- atomically $ (,,)
+    <$> readTVar (currentNickname ircInstance)
+    <*> readTVar (currentUsername ircInstance)
+    <*> readTVar (currentRealname ircInstance)
+
   -- give command to send user information to server
-  sendCmd inst $ Send (nick (B8.pack nick'))
-  sendCmd inst $ Send (user (B8.pack user') "*" "*" (B8.pack rn))
+  sendCmd ircInstance $ Send (nick (B8.pack nick'))
+  sendCmd ircInstance $ Send (user (B8.pack user') "*" "*" (B8.pack real'))
 
   -- Wait for the 001 message before "giving away" our connection
   fix $ \loop -> do
-    msg <- getMsg inst
-    logMaybeIO mlog 3 $ "waitFor001 --- " ++ show msg
+    msg <- getMsg ircInstance
+    logMaybeIO mLogInstance 3 $ "waitFor001 --- " ++ show msg
     case msg of
       Message { msg_command = "001" } -> return ()
       _                               -> loop
 
   -- send join commands for all channels
-  mapM_ (sendCmd inst . Join) chans
-
-  --
-  -- Return instance
-  --
-
-  return $ Right inst
+  chans <- readTVarIO $ currentChannels ircInstance
+  mapM_ (sendCmd ircInstance . Join) chans
 
 
 -- | Shutdown IRC instance, but do not kill own thread
@@ -178,9 +226,9 @@ handleIrcCommands inst _mlog = forever $ do
 
        Send msg           -> sendMsg $ msg
        PrivMsg to msg     -> sendMsg $ privmsg (B8.pack to) (T.encodeUtf8 msg)
-       Notice  to msg     -> sendMsg $ notice  to msg
-       Join chan          -> sendMsg $ joinChan chan
-       Part chan          -> sendMsg $ part chan
+       Notice  to msg     -> sendMsg $ notice to msg
+       Join chan          -> sendMsg $ joinChan (B8.pack chan)
+       Part chan          -> sendMsg $ part (B8.pack chan)
        Nick new           -> sendMsg $ nick (B8.pack new)
 
        Ping               -> sendMsg $ Message Nothing "PING" []
@@ -222,7 +270,7 @@ listenForMessages inst mlog = forever $ do
 -- Sending/receiving commands/messages
 
 sendCmd :: IrcInstance -> ConnectionCommand -> IO ()
-sendCmd inst c = writeChan (cmdChan inst) c
+sendCmd inst = writeChan (cmdChan inst)
 
 getMsg :: IrcInstance -> IO Message
 getMsg inst = readChan (msgChan inst)
@@ -230,7 +278,7 @@ getMsg inst = readChan (msgChan inst)
 -- IRC messages
 
 mkMessage :: String -> [Parameter] -> Message
-mkMessage cmd params = Message Nothing (B8.pack cmd) params
+mkMessage cmd = Message Nothing (B8.pack cmd)
 
-notice :: Nickname -> Text -> Message
+notice :: NickName -> Text -> Message
 notice n t = mkMessage "NOTICE" [B8.pack n, T.encodeUtf8 t]

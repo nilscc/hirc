@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 
@@ -7,7 +8,11 @@ module Hirc.Modules.Admin
   , AdminSettings (..), emptyAdminSettings
   ) where
 
+import qualified Data.Acid as AS
 import qualified Data.Map as M
+import qualified Data.ByteString.Char8 as B8
+
+import Control.Concurrent.STM (readTVarIO)
 
 import Hirc
 import Hirc.Modules.Admin.Acid
@@ -38,18 +43,33 @@ showHelp = do
 
 auth :: String -> AdminM ()
 auth pw = withUsername $ \un -> do
-  response <- update $ Authenticate un pw
-  createCheckpoint
+  response <- update' $ Authenticate un pw
+  createCheckpoint'
   answer response
+ where
+  update' u = do
+    tvar <- ask
+    liftIO $ do
+      as <- readTVarIO tvar
+      AS.update as u
+  createCheckpoint' = do
+    tvar <- ask
+    liftIO $ do
+      as <- readTVarIO tvar
+      AS.createCheckpoint as
 
 requireAuth :: AdminM () -> AdminM ()
 requireAuth m = do
   withUsername $ \uname -> do
-    ia <- query $ IsAdmin uname Nothing
+    ia <- query' $ IsAdmin uname Nothing
     if ia
        then m
        else answer "You don't have permission to do that."
-
+ where
+  query' q = do
+    tvar <- ask
+    as <- liftIO (readTVarIO tvar)
+    liftIO $ AS.query as q
 
 --------------------------------------------------------------------------------
 -- Module instances

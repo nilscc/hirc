@@ -21,17 +21,18 @@ data Reconnect = Reconnect
   , recLastTry  :: Maybe UTCTime
   }
 
-type Nickname = String
-type Username = String
-type Realname = String
+type NickName = String
+type UserName = String
+type RealName = String
+type ChannelName = String
 
 data ConnectionCommand
   = Send Message
-  | PrivMsg Nickname Text  -- ^ private message
-  | Notice  Nickname Text
-  | Join Channel
-  | Part Channel
-  | Nick Nickname
+  | PrivMsg NickName Text  -- ^ private message
+  | Notice  NickName Text
+  | Join ChannelName
+  | Part ChannelName
+  | Nick NickName
   | Ping
   | Pong
   | Quit (Maybe Text)
