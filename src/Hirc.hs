@@ -125,9 +125,10 @@ import Hirc.Types.Hirc
       ContainsLogInstance (askLogInstance) )
 import Hirc.Types.Instances () -- instances only
 import Hirc.Utils
-import Control.Concurrent.STM (readTVarIO, atomically, writeTVar, TChan, writeTChan, newTVarIO, newTChanIO, tryReadTChan)
+import Control.Concurrent.STM (readTVarIO, atomically, writeTVar, TChan, writeTChan, newTVarIO, newTChanIO, tryReadTChan, TMVar, takeTMVar, readTMVar)
 import Hirc.Connection.Managed (runHircM, forkHircM)
 import GHC.Conc.Sync (STM(STM))
+import Control.Monad.Fix (fix)
 
 --------------------------------------------------------------------------------
 -- Hirc instances
@@ -345,13 +346,13 @@ defEventLoop chanThreadIds = do
       writeTChan chanThreadIds t1
       writeTChan chanThreadIds t2
       writeTChan chanThreadIds t3
-        
-  -- connect to IRC server
 
-  ircInst <- liftIO $ atomically . awaitTVar $ ircInstance hircInst
-  mLogInst <- liftIO $ readTVarIO $ logInstance hircInst
+  ircInst <- askIrcInstance -- liftIO $ atomically . awaitTVar $ ircInstance hircInst
+  mLogInst <- askLogInstance -- liftIO $ readTVarIO $ logInstance hircInst
 
   liftIO $ connect ircInst mLogInst
+
+  -- connect to IRC server
 
   --srv <- asks $ server . runningHirc
   --logM 1 $ "Connected to: " ++ (host srv)
@@ -361,20 +362,26 @@ defEventLoop chanThreadIds = do
   -- mapM_ joinCmd chs
 
   -- init modules
-  mods_uninitialized <- liftIO $ readTVarIO (modules hircInst)
-  mods <- fmap catMaybes . forM mods_uninitialized $ \(Module mm _) ->
+  modsUninitialized <- liftIO $ readTVarIO (modules hircInst)
+  mods <- fmap catMaybes . forM modsUninitialized $ \(Module mm _) ->
     catchError (Just . Module mm <$> initModule mm) $ \e -> do
       logM 1 $ "Initialization of module \"" ++ moduleName mm ++ "\" failed:" ++ show e
       return Nothing
 
   -- fork off modules!
-  forM_ mods (defaultModuleLoop >=> liftIO . atomically . writeTChan chanThreadIds)
+  (res:_) <- forM mods $ \mod -> do
+    (tid, res) <- defaultModuleLoop mod
+    liftIO . atomically $ writeTChan chanThreadIds tid
+    return res
 
-  -- wait for modules
-  --mapM_ waitM' tids
+  -- TODO: wait for all threads to finish
+  res' <- liftIO $ atomically $ readTMVar res
+  case res' of
+    Left e -> liftIO . print $ "Module finished with error: " ++ show e
+    Right _ -> return ()
 
 
-defaultModuleLoop :: Module -> HircM ThreadId
+defaultModuleLoop :: Module -> HircM (ThreadId, TMVar (Either HircError ()))
 defaultModuleLoop (Module mm s) = do
   --hircInst <- ask
 
@@ -395,7 +402,7 @@ defaultModuleLoop (Module mm s) = do
         -- . handleError logSTMException
 
   ts <- liftIO $ newTVarIO s
-  (tid, _) <- forkHircM $ runReaderT `flip` ts $ do
+  forkHircM $ runReaderT `flip` ts $ do
     -- run start up functions
     runMaybe $ onStartup mm
 
@@ -429,7 +436,7 @@ defaultModuleLoop (Module mm s) = do
 
       -- pass message to module
       runMaybe $ onMessage mm
-  return tid
+  
  where
   runMaybe (Just go) = go
   runMaybe _         = return ()

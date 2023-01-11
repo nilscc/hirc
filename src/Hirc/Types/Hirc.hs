@@ -15,6 +15,7 @@ import Control.Monad.Reader
 import Control.Monad.Except ( ExceptT )
 import Control.Monad.Error.Class (MonadError)
 import Control.Exception (PatternMatchFail, IOException)
+import Control.Monad.IO.Peel (MonadPeelIO)
 import Data.Kind (Type)
 import Network.Connection (Connection, ConnectionContext)
 import Network.IRC ( Message, Channel )
@@ -120,7 +121,7 @@ class MonadIO m => ContainsLogInstance m where
   askLogInstance :: m (Maybe LogInstance)
 
 -- | Type alias for monads which can send IRC messages
-class (ContainsIrcInstance m, ContainsMessage m, MonadFail m) => CanSend m where
+class (ContainsIrcInstance m, ContainsMessage m, MonadFail m, MonadPeelIO m) => CanSend m where
 
 --------------------------------------------------------------------------------
 -- Modules

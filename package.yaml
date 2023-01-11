@@ -19,6 +19,7 @@ library:
     - bytestring
     - time
     - regex-posix
+    - monad-peel
 
 executables:
   app:

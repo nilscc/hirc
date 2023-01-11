@@ -40,7 +40,7 @@ import qualified Data.ByteString.Char8 as B8
 import Data.Text (Text)
 import qualified Data.Text.Encoding as T
 import Data.Function ( fix )
-import Network.Connection (initConnectionContext, connectTo, ConnectionParams (ConnectionParams, connectionHostname, connectionPort, connectionUseSecure, connectionUseSocks), connectionClose, connectionGetLine, connectionPut)
+import Network.Connection (initConnectionContext, connectTo, ConnectionParams (ConnectionParams, connectionHostname, connectionPort, connectionUseSecure, connectionUseSocks), connectionClose, connectionGetLine, connectionPut, TLSSettings (TLSSettingsSimple, settingDisableCertificateValidation))
 import Network.IRC
 
 import Hirc.Types.Connection
@@ -49,7 +49,7 @@ import Hirc.Types.Connection
       ChannelName,
       Reconnect(Reconnect),
       IrcServer(port, host) )
-import Hirc.Types.Hirc ( LogInstance(..), IrcInstance(..), IrcDefinition(..) )
+import Hirc.Types.Hirc ( LogInstance(..), IrcInstance(..), IrcDefinition(..), HircInstance (ircInstance) )
 --import Hirc.Connection.Managed
 import Hirc.Logging ( logMaybeIO )
 import Data.Maybe (isNothing)
@@ -115,7 +115,7 @@ connect ircInstance mLogInstance = do
     ctxt <- initConnectionContext
     atomically $ do
       mCtxt' <- readTVar $ connectionContext ircInstance
-      unless (isNothing mCtxt') $ writeTVar (connectionContext ircInstance) (Just ctxt)
+      when (isNothing mCtxt') $ writeTVar (connectionContext ircInstance) (Just ctxt)
 
   -- load connection context from instance
   ctxt <- atomically $ requireTVar (connectionContext ircInstance)
@@ -125,7 +125,7 @@ connect ircInstance mLogInstance = do
       params = ConnectionParams {
         connectionHostname = host ircServer,
         connectionPort = port ircServer, 
-        connectionUseSecure = Nothing, -- TODO
+        connectionUseSecure = Just (TLSSettingsSimple True False False),
         connectionUseSocks = Nothing }
 
   -- create connection
@@ -255,6 +255,7 @@ listenForMessages inst mlog = forever $ do
   c <- atomically $ requireTVar (networkConnection inst)
 
   bs <- connectionGetLine 10000 c
+  print bs
   case decode bs of
 
     -- successful message decode

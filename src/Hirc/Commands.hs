@@ -13,6 +13,8 @@ import Hirc.Types.Commands ( IsHircCommand(..), HircCommand(..) )
 import Hirc.Types.Hirc ( ContainsMessage(localMessage), CanSend )
 import Hirc.Messages
     ( onCommand, withParams )
+import Control.Exception (PatternMatchFail)
+import Control.Exception.Peel as CEP
 
 
 --------------------------------------------------------------------------------
@@ -46,7 +48,7 @@ import Hirc.Messages
 -- > {-# OPTIONS -fno-warn-incomplete-patterns #-}
 userCommand :: (CanSend m, IsHircCommand m cmd) => cmd -> m ()
 userCommand cmd = onCommand "PRIVMSG" $ withParams $ \[_,text] ->
-  runC (words text) (toCmd cmd)
+  runC (words text) (toCmd cmd) `CEP.catch` \(PatternMatchFail{}) -> return ()
 
 runC :: (ContainsMessage m, MonadFail m) => [String] -> HircCommand m -> m ()
 runC wrds cmd = case cmd of

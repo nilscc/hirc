@@ -7,10 +7,11 @@ module Hirc.Types.Instances where
 
 import Control.Monad.Trans.Class (MonadTrans(lift))
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
+import Control.Monad.IO.Peel ( MonadPeelIO(peelIO) )
 import Control.Monad.Reader ( ReaderT (runReaderT), MonadReader (ask, local), mapReaderT )
 
 import Hirc.Types.Commands ( IsHircCommand(..), HircCommand(..) )
-import Hirc.Types.Hirc ( CanRun(..), MessageM (unMessageM, MessageM), HircM (unHircM), ContainsMessage (getMessage, localMessage), ContainsIrcInstance (askIrcInstance), HircInstance (ircInstance, logInstance), ContainsLogInstance (askLogInstance), CanSend )
+import Hirc.Types.Hirc ( CanRun(..), MessageM (unMessageM, MessageM), HircM (..), ContainsMessage (getMessage, localMessage), ContainsIrcInstance (askIrcInstance), HircInstance (ircInstance, logInstance), ContainsLogInstance (askLogInstance), CanSend )
 import Control.Concurrent.STM (atomically, readTVarIO, TVar)
 import Hirc.Connection (awaitTVar)
 import Control.Monad.RWS (MonadState)
@@ -51,6 +52,17 @@ instance ContainsMessage MessageM where
 instance (ContainsMessage m) => ContainsMessage (ReaderT r m) where
   getMessage = lift getMessage
   localMessage f = mapReaderT (localMessage f)
+
+
+instance MonadPeelIO HircM where
+  peelIO = HircM $ do
+    k <- peelIO
+    return $ \(HircM m) -> HircM <$> k m
+
+instance MonadPeelIO MessageM where
+  peelIO = MessageM $ do
+    k <- peelIO
+    return $ \(MessageM m) -> MessageM <$> k m
 
 
 instance CanSend MessageM where
