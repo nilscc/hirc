@@ -42,3 +42,4 @@ executables:
       - stm
       - random
       - time
+      - monad-peel

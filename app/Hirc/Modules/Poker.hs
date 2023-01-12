@@ -6,8 +6,9 @@ module Hirc.Modules.Poker
   ) where
 
 import Data.Time.Clock (UTCTime)
-import Control.Monad (mzero, join)
+import Control.Monad (mzero, join, forM_, unless)
 import Control.Monad.State
+import Control.Exception.Peel (handle)
 import qualified Control.Monad.Reader as R
 import Data.Maybe
 import Data.Map (Map)
@@ -20,6 +21,7 @@ import Hirc
 import Hirc.Modules.Poker.Cards
 import Control.Concurrent.STM (atomically, readTVar, writeTVar, modifyTVar)
 import GHC.Conc (TVar(TVar), STM (STM))
+import Control.Monad.ST (runST)
 
 --------------------------------------------------------------------------------
 -- Settings
@@ -63,33 +65,67 @@ type PokerM a = ModuleMessageM PokerModule a
 runPokerModule :: PokerM ()
 runPokerModule = do
 
+  -- handle nick changes of players
   onCommand "NICK" $ doneAfter updatePlayers
 
-  onValidPrefix $ do
-    userCommand $ \"poker" "help"  -> doneAfter showHelp
+  --
+  -- START DEBUG
+  --
 
-    userCommand $ \"poker" "join"  -> doneAfter addPlayer
-    userCommand $ \"poker" "quit"  -> doneAfter removePlayer
+  userCommand $ \"random" -> do
+    sg <- askStdGen
+    mg <- runSTM $ do
+      randomizeDeck sg
+      askGame
+    logM 2 $ show (deck <$> mg)
 
-  userCommand $ \"players"        -> doneAfter showPlayers
-  userCommand $ \"pl"             -> doneAfter showPlayers
+  userCommand $ \"deck" -> do
+    mg <- runSTM askGame
+    logM 2 $ show (deck <$> mg)
+
+  userCommand $ \"next" -> doneAfter $ do
+    runSTM nextPlayer
+    showCurrentPlayer
+
+  userCommand $ \"game" -> doneAfter $ do
+    mg <- runSTM askGame
+    logM 2 $ show mg
+
+  --
+  -- END DEBUG
+  --
+
+  userCommand $ \"poker" "help"     -> doneAfter showHelp
+
+  userCommand $ \"players"          -> doneAfter showPlayers
+  userCommand $ \"pl"               -> doneAfter showPlayers
 
   {-
-  userCommand $ \"turn"           -> doneAfter showCurrentPlayer
-  userCommand $ \"tu"             -> doneAfter showCurrentPlayer
+  userCommand $ \"money"            -> doneAfter showMoney
+  userCommand $ \"mo"               -> doneAfter showMoney
+  -}
 
-  userCommand $ \"money"          -> doneAfter showMoney
-  userCommand $ \"mo"             -> doneAfter showMoney
+  inState NewGame $ do
+    userCommand $ \"poker" "join"   -> doneAfter addPlayer
+    userCommand $ \"poker" "quit"   -> doneAfter removePlayer
 
-  userCommand $ \"order"          -> doneAfter showCurrentOrder
-  userCommand $ \"or"             -> doneAfter showCurrentOrder
+    userCommand $ \"deal" "cards"   -> doneAfter deal
+    userCommand $ \"deal"           -> doneAfter deal
+    userCommand $ \"dc"             -> doneAfter deal
 
+  inStates [PreFlop] $ do
+    userCommand $ \"turn"           -> doneAfter showCurrentPlayer
+    userCommand $ \"tu"             -> doneAfter showCurrentPlayer
+
+    userCommand $ \"order"          -> doneAfter showCurrentOrder
+    userCommand $ \"or"             -> doneAfter showCurrentOrder
+
+    userCommand $ \"hand"           -> doneAfter showHand
+
+
+  {-
   userCommand $ \"cards"          -> doneAfter showCurrentCards
   userCommand $ \"ca"             -> doneAfter showCurrentCards
-
-  userCommand $ \"deal" "cards"   -> doneAfter deal
-  userCommand $ \"deal"           -> doneAfter deal
-  --userCommand $ \"dc"             -> doneAfter deal
 
   userCommand $ \"check"          -> doneAfter check
   userCommand $ \"call"           -> doneAfter call
@@ -98,15 +134,6 @@ runPokerModule = do
   --userCommand $ \"fold" "now"     -> doneAfter fold'
   userCommand $ \"fold"           -> doneAfter fold
   userCommand $ \"all" "in"       -> doneAfter allIn
-
--- On nickchange: update player names
-updatePlayers :: UserName -> NickName -> MessageM ()
-updatePlayers un nn = do
-  updateAll "players" $ \_chan m ->
-    if memberMap un m
-       then insertMap un nn m
-       else m
-
   -}
 
 
@@ -122,38 +149,64 @@ data Player = Player
   }
   deriving (Eq, Show)
 
-{-
 data GameState
-  = GameStateNew
-  | GameStatePlaying
-  | GameStateEnd
--}
+  = NewGame
+  | PreFlop
+  | GameEnd
+  deriving (Eq, Show, Ord)
 
 data Game = Game
-  { players       :: [Player]
-  --, player        :: Player
-  , currentPlayer :: Maybe Player
-  -- TODO: , history       :: [Action]
-  , blinds        :: (Money, Money) -- small/big blind
-  -- , currentState  :: GameState
-  , pot           :: Money
-  , sidePots      :: [([Player], Money)]
-  , deck          :: [Card]
+  { players         :: [Player]
+  , currentPosition :: Int
+  , currentState    :: GameState
+
+  , blinds          :: (Money, Money) -- small/big blind
+  , pot             :: Money
+  , sidePots        :: [([Player], Money)]
+
+  , deck            :: [Card]
+
   --, chatMessages  :: [(UTCTime, Player, String)]
   --, inputBuffer   :: [Char]
   -- TODO: , inputMode     :: InputMode
+  , stdGen        :: Maybe StdGen
   }
   deriving (Eq, Show)
 
 newGame :: Game
 newGame = Game
   { players = []
-  , currentPlayer = Nothing
+  , currentPosition = 0
+  , currentState = NewGame
   , blinds = (smallBlind, bigBlind)
   , pot = 0
   , sidePots = []
   , deck = fullDeck
+  , stdGen = Nothing
   }
+
+askStdGen :: PokerM StdGen
+askStdGen = do
+  mg <- runSTM askGame
+  case mg >>= stdGen of
+    Just sg -> return sg
+    Nothing -> do
+      sg <- liftIO initStdGen
+      runSTM $ updateGame $ \g -> g { stdGen = Just sg }
+      return sg
+
+inState :: GameState -> PokerM () -> PokerM ()
+inState s = inStates [s]
+
+inStates :: [GameState] -> PokerM () -> PokerM ()
+inStates s m = do
+  mg <- runSTM askGame
+  case mg of
+    Nothing
+      | NewGame `elem` s -> m
+    Just g
+      | currentState g `elem` s -> m
+    _ -> return ()
 
 --------------------------------------------------------------------------------
 -- Helper
@@ -167,13 +220,6 @@ runSTM rstm = do
   withNickAndUser $ \n u -> do
     tvar <- R.ask
     liftIO $ atomically $ runReaderT rstm (tvar, n, u, mchan)
-
-{-
-askPokerState :: PokerSTM PokerState
-askPokerState = do
-  (tvar,_,_,_) <- R.ask
-  lift $ readTVar tvar
--}
 
 askNick :: PokerSTM NickName
 askNick = do
@@ -189,7 +235,7 @@ askChan :: PokerSTM (Maybe ChannelName)
 askChan = do
   (_,_,_,mc) <- R.ask
   return mc
-
+  
 -- | Update game if exists, or create a new game for current channel if none
 -- have been started before.
 updateGame :: (Game -> Game) -> PokerSTM ()
@@ -241,12 +287,25 @@ askPlayer = do
 userInGame :: PokerSTM Bool
 userInGame = isJust <$> askPlayer
 
+askPlayers :: PokerSTM [Player]
+askPlayers = maybe [] players <$> askGame
+
+askCurrentPlayer :: PokerSTM (Maybe Player)
+askCurrentPlayer = do
+  mg <- askGame --(((players !!) . currentPosition) =<<) <$> askGame
+  case mg of
+    Just g -> return $ Just (players g !! currentPosition g)
+    _ -> return Nothing
+
+askCurrentState :: PokerSTM (Maybe GameState)
+askCurrentState = fmap currentState <$> askGame
+
 --------------------------------------------------------------------------------
 -- Information
 
 showColors :: PokerM ()
 showColors = do
-  let c1 = fullDeck !! 0
+  let c1 = head fullDeck
       c2 = fullDeck !! 13
       c3 = fullDeck !! 26
       c4 = fullDeck !! 39
@@ -286,6 +345,7 @@ addPlayer = do
     if ig then
       return "You're already in the game!"
      else do
+      setState NewGame
       n <- askNick
       u <- askUser
       updateGame $ addPlayer' Player
@@ -330,6 +390,7 @@ updatePlayers = withParams $ \[newNick] -> runSTM $ do
   updatePokerState $ \pokerState -> 
     pokerState { games = M.map updateNick (games pokerState) }
 
+
 {-
 showMoney :: MessageM ()
 showMoney = withUsername $ \u -> do
@@ -353,8 +414,21 @@ loadMoney u = do
                Nothing ->
                    singletonMap u startingMoney
          return startingMoney
+-}
 
-{ -
+askCurrentOrder :: PokerSTM (Maybe [Player])
+askCurrentOrder = fmap toOrder <$> askGame
+ where
+  toOrder Game{ currentPosition, players } =
+    let (a,b) = L.splitAt currentPosition players
+     in b ++ a
+
+askFirstPosition :: PokerSTM (Maybe Player)
+askFirstPosition = do
+  mg <- askGame
+  return $ (!! 0) . players <$> mg
+
+{-
 getCurrentOrder :: MessageM (Maybe [(NickName, UserName, Integer, Integer)])
 getCurrentOrder = do
   mo <- load "order"
@@ -425,7 +499,53 @@ showCurrentPlayer = do
          say "No one is playing at the moment."
        Nothing ->
          endGame
+-}
 
+showCurrentPlayer :: PokerM ()
+showCurrentPlayer = do
+  (ms, mp, tc) <- runSTM $ (,,)
+    <$> askCurrentState
+    <*> askCurrentPlayer
+    <*> askAmountToCall
+
+  if maybe True (`elem` [NewGame, GameEnd]) ms then do
+    n <- getNickname
+    answer $ "No game in progress. Join a game by typing \"" ++ n ++ ": poker join\", then start it via \"deal cards\"."
+   else do
+    let Just p = mp
+    -- calculate 
+    say $ "It's " ++ playerNickname p ++ "s turn" ++ if tc > 0 then " (" ++ show tc ++ " to call)." else "."
+ where
+  askAmountToCall = return 0 -- TODO
+
+showCurrentOrder :: PokerM ()
+showCurrentOrder = do
+  (Just order, Just fpos) <- runSTM $ (,) <$> askCurrentOrder <*> askFirstPosition
+
+  let formatNames p =
+         -- first player indication
+        (if p == fpos then "*" else "")
+         -- nick
+        ++ playerNickname p
+         -- (current pot/total wealth)
+        ++ " (" ++ show (playerPot p) ++ "/" ++ show (playerMoney p) ++ ")"
+
+  say $ "Currently playing: " ++ intercalate ", " (map formatNames order)
+
+showHand :: PokerM ()
+showHand = do
+  mp <- runSTM askPlayer
+  showHand' mp
+
+showHand' :: Maybe Player -> PokerM ()
+showHand' mp = 
+  case mp of
+    Just p | Just (Hand hand) <- playerHand p -> 
+      whisperTo (playerNickname p) $
+        "Your hand: " ++ unwords (map colorCard hand)
+    _ -> withNickAndUser $ \n u -> logM 1 $ "No hand found: " ++ show mp ++ " (" ++ n ++ " / " ++ u ++ ")"
+
+{-
 showCurrentCards :: MessageM ()
 showCurrentCards = withUsername $ \u -> do
   showCommunityCards
@@ -508,13 +628,62 @@ startGame = withNickAndUser $ \n u -> do
 -}
 
 
-{-
 
 --------------------------------------------------------------------------------
 -- Play
 
-deal :: MessageM ()
+deal :: PokerM ()
 deal = do
+  sg <- askStdGen
+  join . runSTM $ do
+    pls <- askPlayers
+    if length pls < 2 then
+      return $ say "Cannot start a game of poker with less than 2 players."
+     else do
+      setState PreFlop
+      randomizeOrder sg
+      randomizeDeck sg
+      dealCards
+      payBlinds
+      nextPlayer
+      pls' <- askPlayers
+      return $ do
+        say $ "Starting a new round! The players are: " ++ intercalate ", " (map playerNickname pls')
+        say "Dealing hands…"
+        notifyHands
+        showCurrentPlayer
+
+-- Send NOTICE to all players with their hands
+notifyHands :: PokerM ()
+notifyHands = do
+  Just g <- runSTM askGame
+  forM_ (players g) $ showHand' . Just
+
+setState :: GameState -> PokerSTM ()
+setState s = updateGame $ \g -> g { currentState = s}
+
+dealCards :: PokerSTM ()
+dealCards = updateGame $ \g ->
+  let -- number of players
+      n = length (players g)
+      -- the card stack to distribute among players
+      (cards,deck') = L.splitAt (3*n) (deck g)
+      -- split cards into 3 rounds
+      (c1,cs) = L.splitAt n cards
+      (c2,c3) = L.splitAt n cs
+      -- the hands
+      hands = L.zipWith3 (\a b c -> Hand [a,b,c]) c1 c2 c3
+
+   in g { deck = deck'
+        , players = [ p { playerHand = Just h } | (p,h) <- zip (players g) hands ]
+        }
+
+payBlinds :: PokerSTM ()
+payBlinds = return ()
+
+
+
+  {-
   s <- load "state"
   when (s == Nothing || s == Just "end") $ do
     mpls <- load "players"
@@ -532,14 +701,17 @@ deal = do
           store "round started by" cp
           showCurrentPlayer
         _ -> say "Cannot start a game of poker with less than 2 players."
+  -}
 
-randomizeOrder :: Map -> MessageM ()
-randomizeOrder pls = do
-  let usernames = keysMap pls
-  order <- shuffle usernames
-  store "order" (toList order)
-  store "current player" (head order)
+randomizeOrder :: StdGen -> PokerSTM ()
+randomizeOrder sg = updateGame $ \g ->
+  g { players = shuffle sg (players g) }
 
+randomizeDeck :: StdGen -> PokerSTM ()
+randomizeDeck sg = updateGame $ \g ->
+  g { deck = shuffle sg (deck g) }
+
+{-
 dealCards :: Map -> MessageM ()
 dealCards ps = do
   cards <- shuffle fullDeck
@@ -690,7 +862,17 @@ getCurrentPlayer = do
            , Just n <- lookupMap u p ->
              Just (n,u)
          _ -> Nothing
+-}
 
+nextPlayer :: PokerSTM ()
+nextPlayer = do
+  -- TODO
+  -- increment position
+  updateGame $ \g -> g
+    { currentPosition = (currentPosition g + 1) `mod` length (players g)
+    }
+
+{-
 nextPlayer :: MessageM ()
 nextPlayer = do
   mo' <- load "order"
@@ -787,13 +969,13 @@ showdown = require "state" "river" $ do
   startFromFirstPosition
   endGame
 
+-}
 --------------------------------------------------------------------------------
 -- Helper functions
 
-shuffle :: MonadIO m => [a] -> m [a]
-shuffle ls = do
-  sg <- liftIO newStdGen
-  execStateT `flip` ls $
+shuffle :: StdGen -> [a] -> [a]
+shuffle sg ls = do
+  execState `flip` ls $
     forM_ [1..length ls-1] $ \i -> do
       let j = randomRs (0,i) sg !! i
       modify $ swap j i
@@ -803,14 +985,3 @@ shuffle ls = do
         li = l !! i
      in replace i lj (replace j li l)
   replace n y xs = take n xs ++ [y] ++ drop (n+1) xs
-
-fst4 :: (a,b,c,d) -> a
-fst4 (a,_,_,_) = a
-
-readsafe :: Read a => String -> Maybe a
-readsafe s =
-  case reads s of
-       [(x,"")] -> Just x
-       _        -> Nothing
-
--}

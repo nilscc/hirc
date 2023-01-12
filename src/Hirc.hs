@@ -42,7 +42,7 @@ module Hirc
   , IsHircCommand (..)
 
     -- * IRC types & functions
-  , answer, say, whisper, sayIn
+  , answer, say, whisper, whisperTo, sayIn
   , joinChannel, partChannel, sendNotice, quitServer
   , Message (..)
   , IrcServer (..)
@@ -189,7 +189,10 @@ sendCmd' cmd = do
 
 -- | Reply in a query to the user of the current message
 whisper :: CanSend m => String -> m ()
-whisper txt = withNickname $ \n -> sendCmd' $ PrivMsg n (T.pack txt)
+whisper = withNickname . whisperTo
+
+whisperTo :: CanSend m => NickName -> String -> m ()
+whisperTo to txt = sendCmd' $ PrivMsg to (T.pack txt)
 
 reply :: CanSend m => (Either NickName ChannelName -> m ()) -> m ()
 reply m = withParams $ \[c,_] -> do

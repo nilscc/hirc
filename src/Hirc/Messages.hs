@@ -1,10 +1,10 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts,
-   MultiParamTypeClasses, FunctionalDependencies #-}
+{-# LANGUAGE
+  FlexibleInstances, FlexibleContexts, MultiParamTypeClasses,
+  ViewPatterns, AllowAmbiguousTypes
+#-}
 
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
-{-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
 
 module Hirc.Messages where
 
