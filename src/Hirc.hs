@@ -399,14 +399,16 @@ defaultModuleLoop (Module mm s) = do
       logSTMException (e :: BlockedIndefinitelyOnSTM) = do
         logM 1 $ "Blocked indefinitely on STM transaction: " ++ show e
         throwError HircConnectionLost
-      logModuleException (e :: SomeException) = do
+      logPatternMatchFail (e :: PatternMatchFail) = do
+        logM 1 $ "Pattern match failed"
+      logSomeException (e :: SomeException) = do
         logM 1 $ "Exception: " ++ show e
-        --throwError e
 
       handleAll :: (MonadPeelIO m, ContainsLogInstance m, MonadError HircError m) => m () -> m()
-      handleAll = handle logIOException
-                . handle logModuleException
+      handleAll = handle logSomeException
+                . handle logIOException
                 . handle logSTMException
+                . handle logPatternMatchFail
 
   ts <- liftIO $ newTVarIO s
   forkHircM $ runReaderT `flip` ts $ do

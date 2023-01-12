@@ -8,14 +8,18 @@ module Hirc.Modules.Poker
 import Data.Time.Clock (UTCTime)
 import Control.Monad (mzero)
 import Control.Monad.State
+import qualified Control.Monad.Reader as R
 import Data.Maybe
 import Data.Map (Map)
 import qualified Data.Map as M
+import qualified Data.List as L
 import Data.List hiding (delete)
 import System.Random
 
 import Hirc
 import Hirc.Modules.Poker.Cards
+import Control.Concurrent.STM (atomically, readTVar, writeTVar, modifyTVar)
+import GHC.Conc (TVar(TVar), STM (STM))
 
 --------------------------------------------------------------------------------
 -- Settings
@@ -37,13 +41,13 @@ data PokerModule = PokerModule
 pokerModule :: Module
 pokerModule = newModule PokerModule
 
-data PokerState = PokerState
-  { game :: Map ChannelName Game
+newtype PokerState = PokerState
+  { games :: Map ChannelName Game
   }
 
 initPokerState :: HircM PokerState
 initPokerState = return PokerState
-  { game = M.empty
+  { games = M.empty
   }
 
 instance IsModule PokerModule where
@@ -65,10 +69,10 @@ runPokerModule = do -- Module "Poker" (Just updatePlayers) $ do
 
     userCommand $ \"poker" "help"  -> showHelp
 
-    -- userCommand $ \"poker" "join"  -> acceptPlayers
+    userCommand $ \"poker" "join"  -> acceptPlayers
     -- userCommand $ \"poker" "start" -> acceptPlayers
 
-    -- userCommand $ \"poker" "quit"  -> quitGame
+    userCommand $ \"poker" "quit"  -> quitGame
     -- userCommand $ \"poker" "leave" -> quitGame
 
   userCommand $ \"players"        -> showPlayers        >> done
@@ -113,30 +117,39 @@ updatePlayers un nn = do
 -- Types
 
 data Player = Player
-  { playerName  :: String
-  , playerMoney :: Int
-  , playerPot   :: Int
+  { playerNickname :: NickName
+  , playerUsername :: UserName
+  , playerMoney :: Money
+  , playerPot   :: Money
   , playerHand  :: Maybe Hand
   }
   deriving (Eq, Show)
 
 data Game = Game
   { players       :: [Player]
-  , player        :: Player
-  , currentPlayer :: Player
+  --, player        :: Player
+  , currentPlayer :: Maybe Player
   -- TODO: , history       :: [Action]
-  , blinds        :: (Int, Int) -- small/big blind
+  , blinds        :: (Money, Money) -- small/big blind
   -- TODO: , currentState  :: GameState
-  , pot           :: Int
-  , sidePots      :: [([Player], Int)]
+  , pot           :: Money
+  , sidePots      :: [([Player], Money)]
   , deck          :: [Card]
-  , chatMessages  :: [(UTCTime, Player, String)]
-  , inputBuffer   :: [Char]
+  --, chatMessages  :: [(UTCTime, Player, String)]
+  --, inputBuffer   :: [Char]
   -- TODO: , inputMode     :: InputMode
   }
   deriving (Eq, Show)
 
---type Poker a = MonadPeelIO m => MState Game m a
+newGame :: Game
+newGame = Game
+  { players = []
+  , currentPlayer = Nothing
+  , blinds = (smallBlind, bigBlind)
+  , pot = 0
+  , sidePots = []
+  , deck = fullDeck
+  }
 
 --------------------------------------------------------------------------------
 -- Information
@@ -147,7 +160,7 @@ showColors = do
       c2 = fullDeck !! 13
       c3 = fullDeck !! 26
       c4 = fullDeck !! 39
-  answer $ intercalate " " (map colorCard [c1,c2,c3,c4])
+  answer $ unwords (map colorCard [c1,c2,c3,c4])
 
 -- Help
 showHelp :: PokerM ()
@@ -167,22 +180,28 @@ showHelp = do
   whisper "    ca[rds]                   --   show your own and all community cards"
   whisper "    tu[rn]                    --   show whose turn it currently is"
 
+getGame :: PokerM (Maybe Game)
+getGame = do
+  Just c <- getCurrentChannel
+  asks $ M.lookup c . games
+
 requireGame :: PokerM Game
 requireGame = do
-  Just c <- getCurrentChannel
-  Just g <- asks $ M.lookup c . game
-  return g
-  -- case mg of
-  --   Nothing -> do
-  --     answer "No game in progress."
-  --     mzero
-  --   Just g -> return g
+  mg <- getGame
+  case mg of
+    Nothing -> do
+      answer "No game in progress."
+      mzero
+    Just g -> return g
 
 showPlayers :: PokerM ()
 showPlayers = do
   logM 1 "Test"
   g <- requireGame
-  answer $ "ok"
+  if null (players g) then
+    answer "No players yet."
+   else
+    answer $ "Current players: " ++ intercalate ", " (map playerNickname (players g))
 
   -- s <- load "state"
   -- if s == Nothing || s == Just "end" then do
@@ -353,7 +372,7 @@ getCommunityCards = do
 --------------------------------------------------------------------------------
 -- Setting up the game environment
 
-{-
+{ -
 startGame :: MessageM ()
 startGame = withNickAndUser $ \n u -> do
   state <- load "state"
@@ -371,35 +390,78 @@ startGame = withNickAndUser $ \n u -> do
     answer "Poker game already in progress. You can play only one game per channel."
 -}
 
-acceptPlayers :: MessageM ()
-acceptPlayers = withNickAndUser addPlayer
+acceptPlayers :: PokerM ()
+acceptPlayers = withNickAndUser $ \n u -> do
+  Just chan <- getCurrentChannel
+  tv <- R.ask
+  ans <- liftIO $ atomically $ do
+    pokerState <- readTVar tv
+    if userInGame u chan pokerState then 
+      return "You're already in the game!"
+     else do
+      addPlayer tv chan $ Player
+        { playerNickname = n
+        , playerUsername = u
+        , playerMoney = startingMoney
+        , playerPot = 0
+        , playerHand = Nothing
+        }
+      return $ "Player \"" ++ n ++ "\" joins the game."
+  answer ans
+ where
+  userInGame :: UserName -> ChannelName -> PokerState -> Bool
+  userInGame u c ps
+    | Just g <- M.lookup c (games ps) = isJust $
+      L.find ((u ==) . playerUsername) (players g)
+    | otherwise = False
 
-addPlayer :: NickName -> UserName -> MessageM ()
-addPlayer n u = do
-  mps <- load "players"
-  if maybe False (memberMap u) mps then
-     answer "You're already in the game!"
-   else if (fmap sizeMap mps >= Just 15) then
-     answer "Sorry, there are already too many players in the game!"
-   else do
-     update "players" $ \ms ->
-       case ms of
-            Nothing -> singletonMap u n
-            Just m  -> insertMap u n m
-     say $ "Player \"" ++ n ++ "\" joins the game."
+  addPlayer :: TVar PokerState -> ChannelName -> Player -> STM ()
+  addPlayer tPokerState chan player = modifyTVar tPokerState $ \pokerState -> do
+    pokerState { games = M.alter (addPlayer' player) chan (games pokerState) }
 
-quitGame :: MessageM ()
+  addPlayer' :: Player -> Maybe Game -> Maybe Game
+  addPlayer' p (Just g) = Just g { players = players g ++ [p] }
+  addPlayer' p Nothing = addPlayer' p (Just newGame)
+
+  newOrExistingGame :: TVar PokerState -> ChannelName -> STM Game
+  newOrExistingGame tPokerState chan = do
+    pokerState <- readTVar tPokerState
+    case M.lookup chan (games pokerState) of
+      Just g -> return g
+      Nothing -> do
+        let g = newGame
+        writeTVar tPokerState $ pokerState {
+          games = M.insert chan g (games pokerState)
+          }
+        return g
+
+
+  -- mps <- load "players"
+  -- if maybe False (memberMap u) mps then
+  --    answer "You're already in the game!"
+  --  else if (fmap sizeMap mps >= Just 15) then
+  --    answer "Sorry, there are already too many players in the game!"
+  --  else do
+  --    update "players" $ \ms ->
+  --      case ms of
+  --           Nothing -> singletonMap u n
+  --           Just m  -> insertMap u n m
+  --    say $ "Player \"" ++ n ++ "\" joins the game."
+
+quitGame :: PokerM ()
 quitGame = withNickAndUser $ \n u -> do
-  s <- load "state"
-  if s == Nothing || s == Just "end" then do
-     update "players" $ \mm ->
-       case mm of
-            Just m  -> deleteMap u m
-            Nothing -> emptyMap
-     say $ "" ++ n ++ " left the game!"
-   else
-     answer $ "You have to fold first."
+  undefined
+  -- s <- load "state"
+  -- if s == Nothing || s == Just "end" then do
+  --    update "players" $ \mm ->
+  --      case mm of
+  --           Just m  -> deleteMap u m
+  --           Nothing -> emptyMap
+  --    say $ "" ++ n ++ " left the game!"
+  --  else
+  --    answer $ "You have to fold first."
 
+{-
 
 --------------------------------------------------------------------------------
 -- Play
