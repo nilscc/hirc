@@ -100,8 +100,8 @@ withUsername m = do
   m $ dropWhile (== '~') u
 
 withNickAndUser :: CanSend m
-                => (NickName -> UserName -> m ())
-                -> m ()
+                => (NickName -> UserName -> m a)
+                -> m a
 withNickAndUser m = do
   Just (NickName (B8.unpack -> n) (Just (B8.unpack -> u)) _) <- IRC.msg_prefix <$> getMessage
   m n (dropWhile (== '~') u)

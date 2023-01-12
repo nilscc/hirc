@@ -425,13 +425,13 @@ defaultModuleLoop (Module mm s) = do
 
       onCommand "NICK" $
         withNickAndUser $ \n u ->
-        withParams      $ \[new] ->
-        doneAfter       $ do
+        withParams      $ \[new] -> do
           myNick <- getNickname
           myUser <- getUsername
           when (n == myNick && u == myUser) $ do
              setNickname new
              logM 1 $ "Nick changed to \"" ++ new ++ "\""
+             done
 
       onCommand "INVITE" $
         withParams $ \[_,chan] -> joinCmd chan
