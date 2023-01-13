@@ -140,7 +140,7 @@ showHelp = do
 
 
 --------------------------------------------------------------------------------
--- Types
+-- Random
 
 askStdGen :: PokerM StdGen
 askStdGen = do
@@ -151,6 +151,19 @@ askStdGen = do
       sg <- liftIO initStdGen
       runSTM $ updateGame $ \g -> g { stdGen = Just sg }
       return sg
+
+shuffle :: StdGen -> [a] -> [a]
+shuffle sg ls = do
+  execState `flip` ls $
+    forM_ [1..length ls-1] $ \i -> do
+      let j = randomRs (0,i) sg !! i
+      modify $ swap j i
+ where
+  swap j i l =
+    let lj = l !! j
+        li = l !! i
+     in replace i lj (replace j li l)
+  replace n y xs = take n xs ++ [y] ++ drop (n+1) xs
 
 
 --------------------------------------------------------------------------------
@@ -175,42 +188,13 @@ showColors = do
       c4 = fullDeck !! 39
   answer $ unwords (map colorCard [c1,c2,c3,c4])
 
-
 showPlayers :: PokerM ()
 showPlayers = do
-  logM 1 "Test"
   g <- runSTM askGame
   if null (players g) then
     say "No players yet."
    else
     say $ "Current players: " ++ intercalate ", " (map playerNickname (players g))
-
-addPlayer :: PokerM ()
-addPlayer = (logM 2 "addPlayer" >>) . join . runSTM $ do
-
-  (ig,newGame) <- ((, return ()) <$> userInGame) `catchP` \GameNotAvailable -> do
-    updateGame' $ \Nothing -> Just newGame
-    return (False, logM 2 "New game created.")
-
-  if ig then
-    return $ do
-      newGame
-      answer "You're already in the game!"
-   else do
-    n <- askNick
-    u <- askUser
-    updateGame $ addPlayer' Player
-      { playerNickname = n
-      , playerUsername = u
-      , playerMoney = startingMoney -- TODO: load money from bank
-      , playerPot = 0
-      , playerHand = Nothing
-      }
-    return $ do
-      newGame
-      say $ "Player \"" ++ n ++ "\" joins the game."
- where
-  addPlayer' p g = g { players = players g ++ [p] }
 
 showMoney :: PokerM ()
 showMoney = join . runSTM $ do
@@ -224,7 +208,33 @@ showPot :: PokerM ()
 showPot = do
   g <- runSTM askGame
   say $ "Current pot: " ++ show (potHeight g) ++ " (total: " ++ show (totalPotSize g) ++ ")"
-  
+
+
+--------------------------------------------------------------------------------
+-- Start game
+--
+
+addPlayer :: PokerM ()
+addPlayer = join . runSTM $ do
+
+  ig <- userInGame
+  if ig then
+    return $ answer "You're already in the game!"
+   else do
+    n <- askNick
+    u <- askUser
+    updateGame $ addPlayer' Player
+      { playerNickname = n
+      , playerUsername = u
+      , playerMoney = startingMoney -- TODO: load money from bank
+      , playerPot = 0
+      , playerHand = Nothing
+      }
+    return $ say $ "Player \"" ++ n ++ "\" joins the game."
+ where
+  addPlayer' p g = g { players = players g ++ [p] }
+
+
 removePlayer :: PokerM ()
 removePlayer = handle playerNotFound $ do
   join . runSTM $ do
@@ -398,8 +408,7 @@ showHand = do
 showHand' :: Player -> PokerM ()
 showHand' p
   | Just (Hand hand) <- playerHand p =
-    whisperTo (playerNickname p) $
-      "Your hand: " ++ unwords (map colorCard hand)
+    sendNotice $ "Your hand: " ++ unwords (map colorCard hand)
   | otherwise =
     withNickAndUser $ \n u ->
       logM 1 $ "No hand found: " ++ show p ++ " (" ++ n ++ " / " ++ u ++ ")"
@@ -855,18 +864,3 @@ showdown = require "state" "river" $ do
   endGame
 
 -}
---------------------------------------------------------------------------------
--- Helper functions
-
-shuffle :: StdGen -> [a] -> [a]
-shuffle sg ls = do
-  execState `flip` ls $
-    forM_ [1..length ls-1] $ \i -> do
-      let j = randomRs (0,i) sg !! i
-      modify $ swap j i
- where
-  swap j i l =
-    let lj = l !! j
-        li = l !! i
-     in replace i lj (replace j li l)
-  replace n y xs = take n xs ++ [y] ++ drop (n+1) xs

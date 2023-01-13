@@ -43,7 +43,7 @@ module Hirc
 
     -- * IRC types & functions
   , answer, say, whisper, whisperTo, sayIn
-  , joinChannel, partChannel, sendNotice, quitServer
+  , joinChannel, partChannel, sendNotice, sendNoticeTo, quitServer
   , Message (..)
   , IrcServer (..)
   , Reconnect (..)
@@ -228,8 +228,11 @@ joinChannel ch = sendCmd' $ Join ch -- TODO: store current channels somewhere?
 partChannel :: CanSend m => ChannelName -> m ()
 partChannel ch = sendCmd' $ Part ch
 
-sendNotice :: CanSend m => NickName -> String -> m ()
-sendNotice n s = sendCmd' $ Notice n (T.pack s)
+sendNotice :: CanSend m => String -> m ()
+sendNotice s = withNickname $ sendNoticeTo `flip` s
+
+sendNoticeTo :: CanSend m => NickName -> String -> m ()
+sendNoticeTo n s = sendCmd' $ Notice n (T.pack s)
 
 quitServer :: CanSend m => Maybe String -- ^ optional quit message
            -> m ()
