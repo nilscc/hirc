@@ -35,8 +35,6 @@ import Hirc.Modules.Poker.STM
 --------------------------------------------------------------------------------
 -- The main module
 
-
-
 instance IsModule PokerModule where
   type ModuleState PokerModule = PokerState
   moduleName _ = "Poker"
@@ -164,7 +162,6 @@ runSTM rstm = do
   withNickAndUser $ \n u -> do
     tvar <- R.ask
     liftIO $ atomically $ runReaderT rstm (tvar, n, u, mchan)
-
 
 
 --------------------------------------------------------------------------------

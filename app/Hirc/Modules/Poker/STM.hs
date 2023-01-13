@@ -5,9 +5,9 @@ module Hirc.Modules.Poker.STM where
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe (isJust, isNothing)
-import Control.Monad (unless, when)
-import Control.Monad.Trans (lift)
 import Control.Concurrent.STM
+import Control.Monad (unless, when)
+import Control.Monad.Trans (lift, liftIO)
 import Control.Monad.Reader (ReaderT, runReaderT)
 import qualified Control.Monad.Reader as R
 
