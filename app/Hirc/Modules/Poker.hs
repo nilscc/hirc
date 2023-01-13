@@ -8,7 +8,7 @@ module Hirc.Modules.Poker
 import Data.Time.Clock (UTCTime)
 import Control.Monad (mzero, join, forM_, unless, when)
 import Control.Monad.State
-import Control.Exception.Peel (handle, Exception, throw, SomeException (SomeException))
+import Control.Exception.Peel (handle, Exception, throw, SomeException (SomeException), catch)
 import qualified Control.Monad.Reader as R
 import Data.Maybe
 import Data.Map (Map)
@@ -16,27 +16,20 @@ import qualified Data.Map as M
 import qualified Data.List as L
 import Data.List hiding (delete)
 import System.Random
-
-import Hirc
-import Hirc.Modules.Poker.Cards
 import Control.Concurrent.STM (atomically, readTVar, writeTVar, modifyTVar, throwSTM, catchSTM)
 import GHC.Conc (TVar(TVar), STM (STM))
 import Control.Monad.ST (runST)
 import Control.Monad.Error.Class (MonadError(throwError))
 import Control.Monad.Except (runExceptT, ExceptT)
 import Data.Acid.TemplateHaskell (tyVarBndrName)
+import GHC.Num.BigNat (raiseDivZero_BigNat)
+import Data.Data (DataRep(FloatRep))
 
---------------------------------------------------------------------------------
--- Settings
-
-type Money = Integer
-
-startingMoney :: Money
-startingMoney = 10000
-
-bigBlind, smallBlind :: Money
-bigBlind   = 200
-smallBlind = 100
+import Hirc
+import Hirc.Modules.Poker.Cards
+import Hirc.Modules.Poker.Game
+import Hirc.Modules.Poker.Exception
+import Hirc.Modules.Poker.State
 
 --------------------------------------------------------------------------------
 -- The main module
@@ -45,10 +38,6 @@ data PokerModule = PokerModule
 
 pokerModule :: Module
 pokerModule = newModule PokerModule
-
-newtype PokerState = PokerState
-  { games :: Map ChannelName Game
-  }
 
 initPokerState :: HircM PokerState
 initPokerState = return PokerState
@@ -75,13 +64,6 @@ runPokerModule = handle pokerExceptions $ do
   -- START DEBUG
   --
 
-  userCommand $ \"random" -> do
-    sg <- askStdGen
-    g <- runSTM $ do
-      randomizeDeck sg
-      askGame
-    logM 2 $ show (deck g)
-
   userCommand $ \"deck" -> do
     g <- runSTM askGame
     logM 2 $ show (deck g)
@@ -103,12 +85,12 @@ runPokerModule = handle pokerExceptions $ do
   userCommand $ \"players"          -> doneAfter showPlayers
   userCommand $ \"pl"               -> doneAfter showPlayers
 
-  {-
   userCommand $ \"money"            -> doneAfter showMoney
   userCommand $ \"mo"               -> doneAfter showMoney
-  -}
 
-  inState NewGame $ do
+  mg <- runSTM $ ignoreConst Nothing [NotInChannel] askMaybeGame
+
+  when (maybe True isNewGame mg) $ do
     userCommand $ \"poker" "join"   -> doneAfter addPlayer
     userCommand $ \"poker" "quit"   -> doneAfter removePlayer
 
@@ -116,7 +98,9 @@ runPokerModule = handle pokerExceptions $ do
     userCommand $ \"deal"           -> doneAfter deal
     userCommand $ \"dc"             -> doneAfter deal
 
-  inStates [PreFlop] $ do
+  when (maybe False isActiveGame mg) $ do
+    userCommand $ \"pot"            -> doneAfter showPot
+
     userCommand $ \"turn"           -> doneAfter showCurrentPlayer
     userCommand $ \"tu"             -> doneAfter showCurrentPlayer
 
@@ -144,53 +128,27 @@ runPokerModule = handle pokerExceptions $ do
     msg <- getMessage
     logM 1 $ "Exception on message: " ++ show e ++ "\n" ++ show msg
 
+-- Help
+showHelp :: PokerM ()
+showHelp = do
+  whisper "Playing Texas Hold'em, available commands are:"
+  whisper "    <bot>: poker help         --   show this help"
+  whisper "    <bot>: poker join         --   join a new game"
+  whisper "    <bot>: poker leave        --   leave the current game"
+  whisper "    mo[ney]                   --   show your current wealth"
+  whisper "    pl[ayers]                 --   show who is playing in the next game"
+  whisper "    deal [cards]              --   deal cards, start a new game"
+  whisper "While playing:"
+  whisper "    raise/bet <num>           --   bet a new sum (at least big blind or the amount of the last raise)"
+  whisper "    check/call/fold           --   check, call the current bet or fold your cards"
+  whisper "    all in                    --   go all in"
+  whisper "    or[der]                   --   show current order"
+  whisper "    ca[rds]                   --   show your own and all community cards"
+  whisper "    tu[rn]                    --   show whose turn it currently is"
+
+
 --------------------------------------------------------------------------------
 -- Types
-
-data Player = Player
-  { playerNickname :: NickName
-  , playerUsername :: UserName
-  , playerMoney :: Money
-  , playerPot   :: Money
-  , playerHand  :: Maybe Hand
-  }
-  deriving (Eq, Show)
-
-data GameState
-  = NewGame
-  | PreFlop
-  | GameEnd
-  deriving (Eq, Show, Ord)
-
-data Game = Game
-  { players         :: [Player]
-  , currentPosition :: Int
-  , currentState    :: GameState
-
-  , blinds          :: (Money, Money) -- small/big blind
-  , pot             :: Money
-  , sidePots        :: [([Player], Money)]
-
-  , deck            :: [Card]
-
-  --, chatMessages  :: [(UTCTime, Player, String)]
-  --, inputBuffer   :: [Char]
-  -- TODO: , inputMode     :: InputMode
-  , stdGen        :: Maybe StdGen
-  }
-  deriving (Eq, Show)
-
-newGame :: Game
-newGame = Game
-  { players = []
-  , currentPosition = 0
-  , currentState = NewGame
-  , blinds = (smallBlind, bigBlind)
-  , pot = 0
-  , sidePots = []
-  , deck = fullDeck
-  , stdGen = Nothing
-  }
 
 askStdGen :: PokerM StdGen
 askStdGen = do
@@ -202,58 +160,10 @@ askStdGen = do
       runSTM $ updateGame $ \g -> g { stdGen = Just sg }
       return sg
 
-inState :: GameState -> PokerM () -> PokerM ()
-inState s = inStates [s]
-
-inStates :: [GameState] -> PokerM () -> PokerM ()
-inStates s m = handle newGameRule $ do
-  g <- runSTM askGame 
-  when (currentState g `elem` s) m
- where
-  newGameRule GameNotAvailable
-    | NewGame `elem` s = m
-  newGameRule _ = return ()
-
-
---------------------------------------------------------------------------------
--- Exceptions
---
-
-data PokerException
-  = GameNotAvailable
-  | NotInChannel
-  | PlayerNotFound
-  | InsufficientFunds
-  deriving (Show, Exception, Eq)
-
-throwP :: PokerException -> PokerSTM a
-throwP = lift . throwSTM
-
-catchP :: PokerSTM a -> (PokerException -> PokerSTM a) -> PokerSTM a
-catchP m h = do
-  r <- R.ask
-  lift $ runReaderT m r `catchSTM` \e -> runReaderT (h e) r
-
-handleP :: (PokerException -> PokerSTM a) -> PokerSTM a -> PokerSTM a
-handleP = flip catchP
-
-handlePE :: PokerException -> (PokerException -> PokerSTM a) -> PokerSTM a -> PokerSTM a
-handlePE e = handlePEs [e]
-
-handlePEs :: [PokerException] -> (PokerException -> PokerSTM a) -> PokerSTM a -> PokerSTM a
-handlePEs es h = handleP $ \e' -> if e' `elem` es then h e' else throwP e'
-
-ignore :: [PokerException] -> PokerSTM () -> PokerSTM ()
-ignore = ignoreConst ()
-
-ignoreConst :: a -> [PokerException] -> PokerSTM a -> PokerSTM a
-ignoreConst a es = handleP $ \e -> if e `elem` es then return a else throwP e
 
 --------------------------------------------------------------------------------
 -- Helper
 
-
-type PokerSTM = ReaderT (TVar PokerState, NickName, UserName, Maybe ChannelName) STM
 
 runSTM :: PokerSTM a -> PokerM a
 runSTM rstm = do
@@ -302,14 +212,19 @@ updatePokerState f = do
   (tvar,_,_,_) <- R.ask
   lift $ modifyTVar tvar f
 
-askGame :: PokerSTM Game
-askGame = do
+askMaybeGame :: PokerSTM (Maybe Game)
+askMaybeGame = do
   (tvar,_,_,mchan) <- R.ask
   maybe (lift $ throwSTM NotInChannel) `flip` mchan $ \chan -> do
     pokerState <- lift $ readTVar tvar
-    case M.lookup chan (games pokerState) of
-      Just g -> return g
-      Nothing -> lift $ throwSTM GameNotAvailable
+    return $ M.lookup chan (games pokerState)
+
+askGame :: PokerSTM Game
+askGame = do
+  mg <- askMaybeGame
+  case mg of
+    Just g -> return g
+    Nothing -> lift $ throwSTM GameNotAvailable
 
 putGame :: Game -> PokerSTM ()
 putGame g = updateGame' $ const (Just g)
@@ -349,8 +264,9 @@ askCurrentPlayer = do
   g <- askGame
   return $ players g !! currentPosition g
 
-askCurrentState :: PokerSTM GameState
-askCurrentState = currentState <$> askGame
+askCurrentPot :: PokerSTM Money
+askCurrentPot = maximum . map playerPot <$> askPlayers
+
 
 --------------------------------------------------------------------------------
 -- Information
@@ -363,23 +279,6 @@ showColors = do
       c4 = fullDeck !! 39
   answer $ unwords (map colorCard [c1,c2,c3,c4])
 
--- Help
-showHelp :: PokerM ()
-showHelp = do
-  whisper "Playing Texas Hold'em, available commands are:"
-  whisper "    <bot>: poker help         --   show this help"
-  whisper "    <bot>: poker join         --   join a new game"
-  whisper "    <bot>: poker leave        --   leave the current game"
-  whisper "    mo[ney]                   --   show your current wealth"
-  whisper "    pl[ayers]                 --   show who is playing in the next game"
-  whisper "    deal [cards]              --   deal cards, start a new game"
-  whisper "While playing:"
-  whisper "    raise/bet <num>           --   bet a new sum (at least big blind or the amount of the last raise)"
-  whisper "    check/call/fold           --   check, call the current bet or fold your cards"
-  whisper "    all in                    --   go all in"
-  whisper "    or[der]                   --   show current order"
-  whisper "    ca[rds]                   --   show your own and all community cards"
-  whisper "    tu[rn]                    --   show whose turn it currently is"
 
 showPlayers :: PokerM ()
 showPlayers = do
@@ -402,7 +301,6 @@ addPlayer = (logM 2 "addPlayer" >>) . join . runSTM $ do
       newGame
       answer "You're already in the game!"
    else do
-    setState NewGame
     n <- askNick
     u <- askUser
     updateGame $ addPlayer' Player
@@ -418,6 +316,19 @@ addPlayer = (logM 2 "addPlayer" >>) . join . runSTM $ do
  where
   addPlayer' p g = g { players = players g ++ [p] }
 
+showMoney :: PokerM ()
+showMoney = join . runSTM $ do
+  p <- askPlayer
+  return $ do
+    answer $ "You currently have " ++ show (playerMoney p) ++ " in your bank account"
+      ++ (if playerPot p > 0 then " and " ++ show (playerPot p) ++ " in the current pot" else "")
+      ++ "."
+
+showPot :: PokerM ()
+showPot = do
+  g <- runSTM askGame
+  say $ "Current pot: " ++ show (potHeight g) ++ " (total: " ++ show (totalPotSize g) ++ ")"
+  
 removePlayer :: PokerM ()
 removePlayer = handle playerNotFound $ do
   join . runSTM $ do
@@ -558,21 +469,15 @@ showCurrentPlayer = do
 
 showCurrentPlayer :: PokerM ()
 showCurrentPlayer = do
-  (s, p, pot) <- runSTM $ (,,)
-    <$> askCurrentState
-    <*> askCurrentPlayer
-    <*> askMaxPot
-
-  let tc = pot - playerPot p
-
-  if s `elem` [NewGame, GameEnd] then do
-    n <- getNickname
-    answer $ "No game in progress. Join a game by typing \"" ++ n ++ ": poker join\", then start it via \"deal cards\"."
-   else do
-    -- calculate 
-    say $ "Current player is: " ++ playerNickname p ++ (if tc > 0 then " (" ++ show tc ++ " to call)" else "")
- where
-  askMaxPot = maximum . map playerPot <$> askPlayers
+  mg <- runSTM askMaybeGame
+  case mg of
+    Just g | not (isNewGame g) -> do
+      -- calculate value to call for player
+      p <- runSTM askCurrentPlayer
+      let pot = maximum (map playerPot (players g))
+          tc = pot - playerPot p
+      say $ "Current player is: " ++ playerNickname p ++
+        (if tc > 0 then " (" ++ show tc ++ " to call)" else "")
 
 
 showCurrentOrder :: PokerM ()
@@ -698,17 +603,24 @@ deal = do
     if length pls < 2 then
       return $ say "Cannot start a game of poker with less than 2 players."
      else do
-      setState PreFlop
-      randomizeOrder sg
-      randomizeDeck sg
+      g <- askGame
+      unless (isNewGame g) $
+        throwP GameAlreadyStarted
+
+      -- Shuffle player order and card deck
+      let pls' = shuffle sg (players g)
+      putGame g
+        { players = pls'
+        , deck = shuffle sg fullDeck
+        }
+
       dealCards
-      blinds <- payBlinds
-      pls' <- askPlayers
+      b <- payBlinds
       return $ do
         say $ "Starting a new round! The players are: " ++ intercalate ", " (map playerNickname pls')
         say "Dealing hands…"
         notifyHands
-        blinds
+        b
         showCurrentPlayer
 
 -- Send NOTICE to all players with their hands
@@ -717,22 +629,18 @@ notifyHands = do
   g <- runSTM askGame
   forM_ (players g) showHand'
 
-setState :: GameState -> PokerSTM ()
-setState s = updateGame $ \g -> g { currentState = s}
-
 dealCards :: PokerSTM ()
 dealCards = updateGame $ \g ->
   let -- number of players
       n = length (players g)
       -- the card stack to distribute among players
-      (cards,deck') = L.splitAt (3*n) (deck g)
-      -- split cards into 3 rounds
-      (c1,cs) = L.splitAt n cards
-      (c2,c3) = L.splitAt n cs
+      (cards,deck') = L.splitAt (2*n) (deck g)
+      -- split cards into 2 rounds
+      (c1,c2) = L.splitAt n cards
       -- the hands
-      hands = L.zipWith3 (\a b c -> Hand [a,b,c]) c1 c2 c3
+      hands = L.zipWith (\a b -> Hand [a,b]) c1 c2
 
-   in g { deck = deck'
+   in g { deck = take 5 deck'
         , players = [ p { playerHand = Just h } | (p,h) <- zip (players g) hands ]
         }
 
@@ -765,10 +673,11 @@ bet p m = do
   -- check if player has enough money
   case findPlayer g (playerUsername p) of
     Just p
-      | playerMoney p >= m -> putPlayer p
-        { playerMoney = playerMoney p - m
-        , playerPot = playerPot p + m
-        }
+      | playerMoney p >= m -> do
+        putPlayer p
+          { playerMoney = playerMoney p - m
+          , playerPot = playerPot p + m
+          }
       | otherwise -> throwP InsufficientFunds
     _ -> throwP PlayerNotFound
 
@@ -791,17 +700,7 @@ bet p m = do
           store "round started by" cp
           showCurrentPlayer
         _ -> say "Cannot start a game of poker with less than 2 players."
-  -}
 
-randomizeOrder :: StdGen -> PokerSTM ()
-randomizeOrder sg = updateGame $ \g ->
-  g { players = shuffle sg (players g) }
-
-randomizeDeck :: StdGen -> PokerSTM ()
-randomizeDeck sg = updateGame $ \g ->
-  g { deck = shuffle sg (deck g) }
-
-{-
 dealCards :: Map -> MessageM ()
 dealCards ps = do
   cards <- shuffle fullDeck

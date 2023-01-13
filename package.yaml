@@ -32,6 +32,9 @@ executables:
       Hirc.Modules.Poker
       Hirc.Modules.Poker.Acid
       Hirc.Modules.Poker.Cards
+      Hirc.Modules.Poker.Game
+      Hirc.Modules.Poker.State
+      Hirc.Modules.Poker.Exception
     dependencies:
       - hirc
       - base
