@@ -1,6 +1,7 @@
 module Hirc.Modules.Poker.Game where
 
 import Data.Maybe (isJust, isNothing)
+import Data.List (find)
 import System.Random (StdGen)
 
 import Hirc
@@ -119,3 +120,7 @@ isRiver g =
 
 isActiveGame :: Game -> Bool
 isActiveGame g = isPreFlop g || isFlop g || isTurn g || isRiver g
+
+findPlayer :: Game -> UserName -> Maybe Player
+findPlayer g u =
+  find ((u ==) . playerUsername) (players g)

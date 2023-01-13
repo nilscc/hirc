@@ -29,20 +29,13 @@ import Hirc
 import Hirc.Modules.Poker.Cards
 import Hirc.Modules.Poker.Game
 import Hirc.Modules.Poker.Exception
-import Hirc.Modules.Poker.State
+import Hirc.Modules.Poker.Module
+import Hirc.Modules.Poker.STM
 
 --------------------------------------------------------------------------------
 -- The main module
 
-data PokerModule = PokerModule
 
-pokerModule :: Module
-pokerModule = newModule PokerModule
-
-initPokerState :: HircM PokerState
-initPokerState = return PokerState
-  { games = M.empty
-  }
 
 instance IsModule PokerModule where
   type ModuleState PokerModule = PokerState
@@ -52,7 +45,8 @@ instance IsModule PokerModule where
   onStartup _ = Nothing
   onMessage _ = Just runPokerModule
 
-type PokerM a = ModuleMessageM PokerModule a
+pokerModule :: Module
+pokerModule = newModule PokerModule
 
 runPokerModule :: PokerM ()
 runPokerModule = handle pokerExceptions $ do
@@ -164,7 +158,6 @@ askStdGen = do
 --------------------------------------------------------------------------------
 -- Helper
 
-
 runSTM :: PokerSTM a -> PokerM a
 runSTM rstm = do
   mchan <- getCurrentChannel
@@ -172,100 +165,6 @@ runSTM rstm = do
     tvar <- R.ask
     liftIO $ atomically $ runReaderT rstm (tvar, n, u, mchan)
 
-askNick :: PokerSTM NickName
-askNick = do
-  (_,n,_,_) <- R.ask
-  return n
-
-askUser :: PokerSTM UserName
-askUser = do
-  (_,_,u,_) <- R.ask
-  return u
-
-askChan :: PokerSTM (Maybe ChannelName)
-askChan = do
-  (_,_,_,mc) <- R.ask
-  return mc
-
--- | Update game if exists, or create a new game for current channel if none
--- have been started before.
-updateGame :: (Game -> Game) -> PokerSTM ()
-updateGame f = updateGame' $ \case
-  Nothing -> Just $ f newGame
-  Just g -> Just $ f g
-
-updateGame' :: (Maybe Game -> Maybe Game) -> PokerSTM ()
-updateGame' f = do
-  mc <- askChan
-  case mc of
-    Just chan -> updatePokerState $ \pokerState ->
-      pokerState { games = M.alter f chan (games pokerState) }
-    _ -> lift $ throwSTM NotInChannel
-
-askPokerState :: PokerSTM PokerState
-askPokerState = do
-  (tvar,_,_,_) <- R.ask
-  lift $ readTVar tvar
-
-updatePokerState :: (PokerState -> PokerState) -> PokerSTM ()
-updatePokerState f = do
-  (tvar,_,_,_) <- R.ask
-  lift $ modifyTVar tvar f
-
-askMaybeGame :: PokerSTM (Maybe Game)
-askMaybeGame = do
-  (tvar,_,_,mchan) <- R.ask
-  maybe (lift $ throwSTM NotInChannel) `flip` mchan $ \chan -> do
-    pokerState <- lift $ readTVar tvar
-    return $ M.lookup chan (games pokerState)
-
-askGame :: PokerSTM Game
-askGame = do
-  mg <- askMaybeGame
-  case mg of
-    Just g -> return g
-    Nothing -> lift $ throwSTM GameNotAvailable
-
-putGame :: Game -> PokerSTM ()
-putGame g = updateGame' $ const (Just g)
-
-askPlayer :: PokerSTM Player
-askPlayer = do
-  u <- askUser
-  g <- askGame
-  maybe (lift $ throwSTM PlayerNotFound) return $
-    findPlayer g u
-
-findPlayer :: Game -> UserName -> Maybe Player
-findPlayer g u =
-  L.find ((u ==) . playerUsername) (players g)
-
-updatePlayer :: UserName -> (Player -> Player) -> PokerSTM ()
-updatePlayer u f = do
-  g <- askGame
-  unless (isJust $ findPlayer g u) $
-    throwP PlayerNotFound
-  putGame g
-    { players = map (\p -> if playerUsername p == u then f p else p) (players g)
-    }
-
-putPlayer :: Player -> PokerSTM ()
-putPlayer p = updatePlayer (playerUsername p) (const p)
-
-userInGame :: PokerSTM Bool
-userInGame = handleP (return False `const`) $ True <$ askPlayer
-
-askPlayers :: PokerSTM [Player]
-askPlayers = ignoreConst [] [GameNotAvailable] $
-  players <$> askGame
-
-askCurrentPlayer :: PokerSTM Player
-askCurrentPlayer = do
-  g <- askGame
-  return $ players g !! currentPosition g
-
-askCurrentPot :: PokerSTM Money
-askCurrentPot = maximum . map playerPot <$> askPlayers
 
 
 --------------------------------------------------------------------------------
