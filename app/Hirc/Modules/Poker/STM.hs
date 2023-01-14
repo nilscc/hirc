@@ -1,9 +1,10 @@
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE LambdaCase, NamedFieldPuns #-}
 
 module Hirc.Modules.Poker.STM where
 
 import Data.Map (Map)
 import qualified Data.Map as M
+import qualified Data.List as L
 import Data.Maybe (isJust, isNothing)
 import Control.Concurrent.STM
 import Control.Monad (unless, when)
@@ -146,3 +147,34 @@ askCurrentPlayer = do
 
 askCurrentPot :: PokerSTM Money
 askCurrentPot = maximum . map playerPot <$> askPlayers
+
+askToCall :: PokerSTM Money
+askToCall = do
+  pl <- askPlayer
+  pot <- askCurrentPot
+  return $ pot - playerPot pl
+
+askCurrentOrder :: PokerSTM [Player]
+askCurrentOrder = toOrder <$> askGame
+ where
+  toOrder Game{ currentPosition, players } =
+    let (a,b) = L.splitAt currentPosition players
+     in b ++ a
+
+askFirstPosition :: PokerSTM Player
+askFirstPosition = (!! 0) . players <$> askGame
+
+bet :: Player -> Money -> PokerSTM ()
+bet p m = do
+  g <- askGame
+
+  -- check if player has enough money
+  case findPlayer g (playerUsername p) of
+    Just p
+      | playerMoney p >= m -> do
+        putPlayer p
+          { playerMoney = playerMoney p - m
+          , playerPot = playerPot p + m
+          }
+      | otherwise -> throwP InsufficientFunds
+    _ -> throwP PlayerNotFound

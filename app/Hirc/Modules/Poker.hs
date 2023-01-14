@@ -50,7 +50,7 @@ runPokerModule :: PokerM ()
 runPokerModule = handle pokerExceptions $ do
 
   -- handle nick changes of players
-  onCommand "NICK" $ doneAfter updatePlayers
+  onCommand "NICK" $ doneAfter updatePlayerNicknames
 
   --
   -- START DEBUG
@@ -82,15 +82,19 @@ runPokerModule = handle pokerExceptions $ do
 
   mg <- runSTM $ ignoreConst Nothing [NotInChannel] askMaybeGame
 
+  -- starting a new game
   when (maybe True isNewGame mg) $ do
-    userCommand $ \"poker" "join"   -> doneAfter addPlayer
-    userCommand $ \"poker" "quit"   -> doneAfter removePlayer
+
+    userCommand $ \"poker" "join"   -> doneAfter playerJoin
+    userCommand $ \"poker" "quit"   -> doneAfter playerQuit
 
     userCommand $ \"deal" "cards"   -> doneAfter deal
     userCommand $ \"deal"           -> doneAfter deal
     userCommand $ \"dc"             -> doneAfter deal
 
+  -- while in game
   when (maybe False isActiveGame mg) $ do
+
     userCommand $ \"pot"            -> doneAfter showPot
 
     userCommand $ \"turn"           -> doneAfter showCurrentPlayer
@@ -101,14 +105,14 @@ runPokerModule = handle pokerExceptions $ do
 
     userCommand $ \"hand"           -> doneAfter showHand
 
+    userCommand $ \"check"          -> doneAfter check
+    userCommand $ \"call"           -> doneAfter call
+    userCommand $ \"raise" amount   -> doneAfter $ raise (read amount)
 
   {-
   userCommand $ \"cards"          -> doneAfter showCurrentCards
   userCommand $ \"ca"             -> doneAfter showCurrentCards
 
-  userCommand $ \"check"          -> doneAfter check
-  userCommand $ \"call"           -> doneAfter call
-  userCommand $ \"raise" amount   -> doneAfter $ raise amount
   userCommand $ \"bet"   amount   -> doneAfter $ raise amount
   --userCommand $ \"fold" "now"     -> doneAfter fold'
   userCommand $ \"fold"           -> doneAfter fold
@@ -197,12 +201,11 @@ showPlayers = do
     say $ "Current players: " ++ intercalate ", " (map playerNickname (players g))
 
 showMoney :: PokerM ()
-showMoney = join . runSTM $ do
-  p <- askPlayer
-  return $ do
-    answer $ "You currently have " ++ show (playerMoney p) ++ " in your bank account"
-      ++ (if playerPot p > 0 then " and " ++ show (playerPot p) ++ " in the current pot" else "")
-      ++ "."
+showMoney = do
+  p <- runSTM askPlayer
+  answer $ "You currently have " ++ show (playerMoney p) ++ " in your bank account"
+    ++ (if playerPot p > 0 then " and " ++ show (playerPot p) ++ " in the current pot" else "")
+    ++ "."
 
 showPot :: PokerM ()
 showPot = do
@@ -214,8 +217,8 @@ showPot = do
 -- Start game
 --
 
-addPlayer :: PokerM ()
-addPlayer = join . runSTM $ do
+playerJoin :: PokerM ()
+playerJoin = join . runSTM $ do
 
   ig <- userInGame
   if ig then
@@ -235,8 +238,8 @@ addPlayer = join . runSTM $ do
   addPlayer' p g = g { players = players g ++ [p] }
 
 
-removePlayer :: PokerM ()
-removePlayer = handle playerNotFound $ do
+playerQuit :: PokerM ()
+playerQuit = handle playerNotFound $ do
   join . runSTM $ do
     p <- askPlayer
     if isNothing (playerHand p) then do
@@ -251,8 +254,8 @@ removePlayer = handle playerNotFound $ do
  where
   playerNotFound PlayerNotFound = done
 
-updatePlayers :: PokerM ()
-updatePlayers = withParams $ \[newNick] -> runSTM $ do
+updatePlayerNicknames :: PokerM ()
+updatePlayerNicknames = withParams $ \[newNick] -> runSTM $ do
 
   u <- askUser
   let changeNick p@Player{ playerUsername }
@@ -288,19 +291,7 @@ loadMoney u = do
                Nothing ->
                    singletonMap u startingMoney
          return startingMoney
--}
 
-askCurrentOrder :: PokerSTM [Player]
-askCurrentOrder = toOrder <$> askGame
- where
-  toOrder Game{ currentPosition, players } =
-    let (a,b) = L.splitAt currentPosition players
-     in b ++ a
-
-askFirstPosition :: PokerSTM Player
-askFirstPosition = (!! 0) . players <$> askGame
-
-{-
 getCurrentOrder :: MessageM (Maybe [(NickName, UserName, Integer, Integer)])
 getCurrentOrder = do
   mo <- load "order"
@@ -571,20 +562,6 @@ payBlinds = do
     say $ playerNickname p1 ++ " pays " ++ show sb ++ " (small blind)."
     say $ playerNickname p2 ++ " pays " ++ show bb ++ " (big blind)."
 
-bet :: Player -> Money -> PokerSTM ()
-bet p m = do
-  g <- askGame
-
-  -- check if player has enough money
-  case findPlayer g (playerUsername p) of
-    Just p
-      | playerMoney p >= m -> do
-        putPlayer p
-          { playerMoney = playerMoney p - m
-          , playerPot = playerPot p + m
-          }
-      | otherwise -> throwP InsufficientFunds
-    _ -> throwP PlayerNotFound
 
 
   {-
@@ -657,6 +634,21 @@ bet u m = do
   inc Nothing  = Just m
   inc (Just c) = Just $ c + m
 
+-}
+
+check :: PokerM ()
+check = join . runSTM $ do
+  pl <- askPlayer
+  tc <- askToCall
+  if tc == 0 then do
+    nextPlayer
+    return $ do
+      say $ playerNickname pl ++ " checks."
+      showCurrentPlayer
+   else
+    return $ answer "You can't do that!"
+
+{-
 check :: MessageM ()
 check = requireCurrentPlayer $
   withNickAndUser $ \n u -> do
@@ -667,7 +659,25 @@ check = requireCurrentPlayer $
        showCurrentPlayer
      else
        answer "You can't do that!"
+-}
 
+call :: PokerM ()
+call = join . runSTM $ do
+  pl <- askPlayer
+  tc <- askToCall
+  if tc > 0 && playerMoney pl >= tc then do
+    bet pl tc
+    nextPlayer
+    return $ do
+      say $ playerNickname pl ++ " calls " ++ show tc ++ "."
+      showCurrentPlayer
+   else if playerMoney pl < tc then
+    return $ answer $ "You don't have enough money to do that. " ++
+      "To call: " ++ show tc ++ ", your wealth: " ++ show (playerMoney pl)
+   else
+    return $ answer "You can't do that."
+
+{-
 call :: MessageM ()
 call = requireCurrentPlayer $
   withNickAndUser $ \n u -> do
@@ -682,7 +692,15 @@ call = requireCurrentPlayer $
        answer $ "You don't have enough money to do that."
      else
        answer "You can't do that."
+-}
 
+raise :: Money -> PokerM ()
+raise m = join . runSTM $ do
+  pl <- askPlayer
+  tc <- askToCall
+  undefined
+
+{-
 raise :: String -> MessageM ()
 raise (readsafe -> Just r) = requireCurrentPlayer $
   withNickAndUser $ \n u -> do
