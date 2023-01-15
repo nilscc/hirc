@@ -7,6 +7,7 @@ import qualified Data.Map as M
 import qualified Data.List as L
 import Data.Maybe (isJust, isNothing)
 import Control.Concurrent.STM
+import qualified Control.Concurrent.STM as STM
 import Control.Monad (unless, when)
 import Control.Monad.Trans (lift, liftIO)
 import Control.Monad.Reader (ReaderT, runReaderT)
@@ -24,6 +25,17 @@ import Hirc.Modules.Poker.Exception
 
 type PokerSTM = ReaderT (TVar PokerState, NickName, UserName, Maybe ChannelName) STM
 
+
+--------------------------------------------------------------------------------
+-- Lifted STM operations
+
+orElse :: PokerSTM a -> PokerSTM a -> PokerSTM a
+orElse a b = do
+  r <- R.ask
+  lift $ STM.orElse (runReaderT a r) (runReaderT b r)
+
+check :: Bool -> PokerSTM ()
+check = lift . STM.check
 
 --------------------------------------------------------------------------------
 -- STM Exception handling
@@ -140,17 +152,29 @@ askPlayers :: PokerSTM [Player]
 askPlayers = ignoreConst [] [GameNotAvailable] $
   players <$> askGame
 
+askCurrentPosition :: PokerSTM Position
+askCurrentPosition = currentPosition <$> askGame
+
 askCurrentPlayer :: PokerSTM Player
 askCurrentPlayer = do
   g <- askGame
   return $ players g !! currentPosition g
 
+isCurrentPlayer :: PokerSTM Bool
+isCurrentPlayer = do
+  p <- askPlayer
+  cp <- askCurrentPlayer
+  return $ p == cp
+
 askCurrentPot :: PokerSTM Money
 askCurrentPot = maximum . map playerPot <$> askPlayers
 
+askLastRaise :: PokerSTM (Maybe (Position, Money))
+askLastRaise = lastRaise <$> askGame
+
 askToCall :: PokerSTM Money
 askToCall = do
-  pl <- askPlayer
+  pl <- askCurrentPlayer
   pot <- askCurrentPot
   return $ pot - playerPot pl
 

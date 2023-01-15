@@ -30,20 +30,24 @@ data Player = Player
   }
   deriving (Eq, Show)
 
+type Position = Int
+
 data Game = Game
-  { players         :: [Player]
-  , currentPosition :: Int
+  { players           :: [Player]
+  , currentPosition   :: Position
 
-  , blinds          :: (Money, Money) -- small/big blind
-  , sidePots        :: [([Player], Money)]
+  , lastRaise         :: Maybe (Position, Money)
 
-  , deck            :: [Card]
-  , flop            :: Maybe (Card, Card, Card)
-  , turn            :: Maybe Card
-  , river           :: Maybe Card
+  , blinds            :: (Money, Money) -- small/big blind
+  , sidePots          :: [([Player], Money)]
 
-  --, chatMessages  :: [(UTCTime, Player, String)]
-  --, inputBuffer   :: [Char]
+  , deck              :: [Card]
+  , flop              :: Maybe (Card, Card, Card)
+  , turn              :: Maybe Card
+  , river             :: Maybe Card
+
+  --, chatMessages    :: [(UTCTime, Player, String)]
+  --, inputBuffer     :: [Char]
   -- TODO: , inputMode     :: InputMode
   , stdGen        :: Maybe StdGen
   }
@@ -53,6 +57,7 @@ newGame :: Game
 newGame = Game
   { players = []
   , currentPosition = 0
+  , lastRaise = Nothing
   , blinds = (smallBlind, bigBlind)
   , sidePots = []
   , deck = []
@@ -84,7 +89,6 @@ isNewGame g =
 
 isPreFlop :: Game -> Bool
 isPreFlop g =
-  length (deck g) == 5 &&
   isNothing (flop g) &&
   isNothing (turn g) &&
   isNothing (river g) &&
@@ -93,7 +97,6 @@ isPreFlop g =
 
 isFlop :: Game -> Bool
 isFlop g =
-  length (deck g) == 2 &&
   isJust (flop g) &&
   isNothing (turn g) &&
   isNothing (river g) &&
@@ -102,7 +105,6 @@ isFlop g =
 
 isTurn :: Game -> Bool
 isTurn g =
-  length (deck g) == 1 &&
   isJust (flop g) &&
   isJust (turn g) &&
   isNothing (river g) &&
@@ -111,7 +113,6 @@ isTurn g =
 
 isRiver :: Game -> Bool
 isRiver g =
-  null (deck g) &&
   isJust (flop g) &&
   isJust (turn g) &&
   isJust (river g) &&
@@ -124,3 +125,60 @@ isActiveGame g = isPreFlop g || isFlop g || isTurn g || isRiver g
 findPlayer :: Game -> UserName -> Maybe Player
 findPlayer g u =
   find ((u ==) . playerUsername) (players g)
+
+dealCards :: Game -> Game
+dealCards g = 
+  let -- number of players
+      n = length (players g)
+      -- the card stack to distribute among players
+      (cards,deck') = splitAt (2*n) (deck g)
+      -- split cards into 2 rounds
+      (c1,c2) = splitAt n cards
+      -- the hands
+      hands = zipWith (\a b -> Hand [a,b]) c1 c2
+   in g { deck = deck'
+        , players = [ p { playerHand = Just h } | (p,h) <- zip (players g) hands ]
+        }
+
+burnCard :: Game -> Game
+burnCard g = g { deck = tail (deck g) }
+
+showFlop :: Game -> Game
+showFlop = showF . burnCard
+ where
+  showF g
+    | (a:b:c:_) <- deck g
+    , Nothing <- flop g
+    , Nothing <- turn g
+    , Nothing <- river g = g
+      { deck = drop 3 (deck g)
+      , flop = Just (a,b,c)
+      }
+    | otherwise = g
+
+showTurn :: Game -> Game
+showTurn = showT . burnCard
+ where
+  showT g
+    | (a:_) <- deck g
+    , Just _ <- flop g
+    , Nothing <- turn g
+    , Nothing <- river g = g
+      { deck = tail (deck g)
+      , turn = Just a
+      }
+    | otherwise = g
+
+showRiver :: Game -> Game
+showRiver = showR . burnCard
+ where
+  showR g
+    | (a:_) <- deck g
+    , Just _ <- flop g
+    , Just _ <- turn g
+    , Nothing <- river g = g
+      { deck = tail (deck g)
+      , river = Just a
+      }
+    | otherwise = g
+

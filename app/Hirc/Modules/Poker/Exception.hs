@@ -14,4 +14,5 @@ data PokerException
   | NotInChannel
   | PlayerNotFound
   | InsufficientFunds
+  | GameUpdateFailed
   deriving (Show, Exception, Eq)
