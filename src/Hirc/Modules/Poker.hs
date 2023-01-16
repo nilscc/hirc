@@ -58,7 +58,7 @@ runPokerModule = handle pokerExceptions $ do
   --
 
   userCommand $ \"game" -> doneAfter $ do
-    mg <- runSTM askGame
+    mg <- runSTM askMaybeGame
     logM 2 $ show mg
 
   userCommand $ \"tc" -> doneAfter $ do
@@ -504,7 +504,7 @@ deal = do
     check $ length pls >= 2
 
     updateGame dealCards
-    blnds <- payBlinds
+    blnds <- payBlinds'
 
     return $ do
       say $ "Starting a new round! The players are: " ++ intercalate ", " (map playerNickname pls)
@@ -518,22 +518,14 @@ notifyHands = do
   g <- runSTM askGame
   forM_ (players g) showHand'
 
-payBlinds :: PokerSTM (PokerM ())
-payBlinds = do
-
-  -- lookup small and big blinds
+payBlinds' :: PokerSTM (PokerM ())
+payBlinds' = do
   g <- askGame
   let (sb,bb) = blinds g
+      (p1:p2:_) = players g
 
-  -- pay small blind
-  p1 <- askCurrentPlayer
-  bet p1 sb
-  incPosition
-
-  -- pay big blind
-  p2 <- askCurrentPlayer
-  bet p2 bb
-  incPosition
+  -- lookup small and big blinds
+  updateGame payBlinds
 
   -- done
   return $ do
@@ -686,10 +678,10 @@ nextPlayer = do
     -- advance current position to next player
     incPosition
     -- check if phase has ended
-    endPhase g `orElse` return showCurrentPlayer
+    endPhase `orElse` return showCurrentPlayer
  where
-  endPhase g = do
-
+  endPhase = do
+    g <- askGame
     let mlr = lastRaise g
         cp = currentPosition g
         np = length $ players g -- number of players
@@ -697,7 +689,7 @@ nextPlayer = do
     -- end phase only if:
     lift $ STM.check $ maybe
       -- there was no raise yet and current position is first player after big blind
-      (cp == (2 `mod` np))
+      (cp == 0)
       -- or current position is last raise
       ((cp ==) . fst)
       mlr

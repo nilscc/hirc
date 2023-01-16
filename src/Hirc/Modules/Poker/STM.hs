@@ -192,13 +192,14 @@ bet :: Player -> Money -> PokerSTM ()
 bet p m = do
   g <- askGame
 
-  -- check if player has enough money
+  -- check if player has enough money.
+  -- lookup player from game, as his money/pot might have be different
   case findPlayer g (playerUsername p) of
-    Just p
-      | playerMoney p >= m -> do
-        putPlayer p
-          { playerMoney = playerMoney p - m
-          , playerPot = playerPot p + m
+    Just p'
+      | playerMoney p' >= m -> do
+        putPlayer p'
+          { playerMoney = playerMoney p' - m
+          , playerPot = playerPot p' + m
           }
       | otherwise -> throwP InsufficientFunds
     _ -> throwP PlayerNotFound

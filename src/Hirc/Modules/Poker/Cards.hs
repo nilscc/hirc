@@ -172,12 +172,13 @@ toHand s = Hand <$> if length cards == 5 then Just cards else Nothing
 --------------------------------------------------------------------------------
 -- Output
 
+-- ♠️♣️♥️♦️
 instance Show Suite where
     show s = case s of
-               Clubs -> "C"
-               Diamonds -> "D"
-               Hearts -> "H"
-               Spades -> "S"
+               Clubs -> "♣️" -- "C"
+               Diamonds -> "♦️" -- "D"
+               Hearts -> "♥️" -- "H"
+               Spades -> "♠️" --"S"
 
 instance Show Value where
     show v = case v of
@@ -198,7 +199,7 @@ colorCard c =
   "\STX\ETX" ++ colorcode ++ " " ++ show c ++ " \SI"
  where
   colorcode = case cSuite c of
-                   Clubs    -> "00,01"
-                   Diamonds -> "00,04"
-                   Hearts   -> "00,03"
-                   Spades   -> "00,02"
+                   Clubs    -> "01,00"
+                   Spades   -> "01,00" -- "00,02"
+                   Diamonds -> "04,00"
+                   Hearts   -> "04,00" -- "00,03"

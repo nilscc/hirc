@@ -20,6 +20,7 @@ library:
     - time
     - regex-posix
     - monad-peel
+    - random
 
 executables:
   app:
@@ -29,13 +30,6 @@ executables:
       Hirc.Modules
       Hirc.Modules.Admin
       Hirc.Modules.Admin.Acid
-      Hirc.Modules.Poker
-      Hirc.Modules.Poker.Acid
-      Hirc.Modules.Poker.Cards
-      Hirc.Modules.Poker.Game
-      Hirc.Modules.Poker.Module
-      Hirc.Modules.Poker.STM
-      Hirc.Modules.Poker.Exception
     dependencies:
       - hirc
       - base
@@ -44,6 +38,16 @@ executables:
       - acid-state
       - bytestring
       - stm
-      - random
       - time
       - monad-peel
+
+tests:
+  spec:
+    main: "Spec.hs"
+    ghc-options: "-threaded -O0"
+    source-dirs:
+      - test
+    dependencies:
+      - hirc
+      - base
+      - hspec

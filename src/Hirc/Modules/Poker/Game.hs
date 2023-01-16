@@ -1,7 +1,7 @@
 module Hirc.Modules.Poker.Game where
 
 import Data.Maybe (isJust, isNothing)
-import Data.List (find)
+import Data.List (find, filter)
 import System.Random (StdGen)
 
 import Hirc
@@ -126,6 +126,21 @@ findPlayer :: Game -> UserName -> Maybe Player
 findPlayer g u =
   find ((u ==) . playerUsername) (players g)
 
+
+--------------------------------------------------------------------------------
+-- Game Activities
+--
+
+joinPlayer :: Player -> Game -> Game
+joinPlayer p g = g
+  { players = players g ++ [ p { playerPot = 0, playerHand = Nothing }]
+  }
+
+partPlayer :: Player -> Game -> Game
+partPlayer p g = g
+  { players = filter ((playerUsername p /=) . playerUsername) (players g)
+  }
+
 dealCards :: Game -> Game
 dealCards g = 
   let -- number of players
@@ -139,6 +154,17 @@ dealCards g =
    in g { deck = deck'
         , players = [ p { playerHand = Just h } | (p,h) <- zip (players g) hands ]
         }
+
+payBlinds :: Game -> Game
+payBlinds g =
+  let (p1:p2:pls) = players g
+      (sb,bb) = blinds g
+   in g { players = pls ++ [bet p1 sb,bet p2 bb]
+        }
+ where
+  bet p m = p { playerMoney = playerMoney p - m
+              , playerPot = playerPot p + m }
+
 
 burnCard :: Game -> Game
 burnCard g = g { deck = tail (deck g) }
