@@ -1,6 +1,6 @@
-module Hirc.Modules.Poker.Game.Test (pokerGameSpec) where
+module Hirc.Modules.Poker.GameTest (pokerGameSpec) where
 
-import Test.Hspec
+import Test.Hspec ( describe, it, shouldBe, Spec )
 
 import Hirc
 import Hirc.Modules.Poker.Game
@@ -8,7 +8,7 @@ import Hirc.Modules.Poker.Game
 newPlayer :: NickName -> Player
 newPlayer nick = Player
   { playerHand = Nothing
-  , playerMoney = 10000
+  , playerStack = 10000
   , playerNickname = nick
   , playerUsername = nick
   , playerPot = 0
@@ -21,9 +21,9 @@ pokerGameSpec = do
     it "should reset player pots and hand" $ do
       let p = (newPlayer "player1") { playerPot = 1000 }
           g = joinPlayer p $ newGame
-          p' = 
-      playerPot (players g !! 0) `shouldBe` 0
-      playerHand (players g !! 0) `shouldBe` Nothing
+          --p' = 
+      playerPot (head $ players g) `shouldBe` 0
+      playerHand (head $ players g) `shouldBe` Nothing
 
     it "should remove the correct player only" $ do
       let p1 = newPlayer "p1"

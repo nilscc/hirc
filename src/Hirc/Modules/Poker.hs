@@ -877,7 +877,7 @@ endGame = do
     return $ do
       say "Showdown! These are the players hands:"
       forM_ (players g) $ \p@Player{ playerHand = Just h }->
-        say $ "  " ++ playerNickname p ++ ": " ++ unwords (map showUnicode (hCards h))
+        say $ "  " ++ playerNickname p ++ ": " ++ unwords (map colorCard (hCards h))
    else do
     return $ do
       say $

@@ -111,7 +111,7 @@ threeOfAKind (Hand cs) = do
 twoPairs :: Hand -> Maybe Rank
 twoPairs h = do
     Pair v1 cs <- pair h
-    Pair v2 [c] <- pair $ Hand cs
+    Pair v2 (c:_) <- pair $ Hand cs
     return $ TwoPairs (max v1 v2) (min v1 v2) c
 
 pair :: Hand -> Maybe Rank
@@ -180,7 +180,6 @@ toHand s = Hand <$> if length cards == 5 then Just cards else Nothing
 --------------------------------------------------------------------------------
 -- Output
 
--- ♠️♣️♥️♦️
 instance Show Suite where
     show s = case s of
                Clubs -> "C"
