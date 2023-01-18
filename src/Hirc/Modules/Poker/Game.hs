@@ -6,11 +6,10 @@ import System.Random (StdGen)
 
 import Hirc
 import Hirc.Modules.Poker.Cards
+import Hirc.Modules.Poker.Bank (Money)
 
 --------------------------------------------------------------------------------
 -- Settings
-
-type Money = Integer
 
 startingMoney :: Money
 startingMoney = 10000
@@ -24,7 +23,7 @@ smallBlind = 100
 data Player = Player
   { playerNickname :: NickName
   , playerUsername :: UserName
-  , playerMoney :: Money
+  , playerStack :: Money
   , playerPot   :: Money
   , playerHand  :: Maybe Hand
   }
@@ -39,6 +38,7 @@ data Game = Game
   , lastRaise         :: Maybe (Position, Money)
 
   , blinds            :: (Money, Money) -- small/big blind
+  , pot               :: Money
   , sidePots          :: [([Player], Money)]
 
   , deck              :: [Card]
@@ -59,6 +59,7 @@ newGame = Game
   , currentPosition = 0
   , lastRaise = Nothing
   , blinds = (smallBlind, bigBlind)
+  , pot = 0
   , sidePots = []
   , deck = []
   , flop = Nothing
@@ -68,13 +69,13 @@ newGame = Game
   }
 
 potHeight :: Game -> Money
-potHeight g = maximum (map playerPot (players g))
+potHeight g = maximum $ map playerPot (players g)
 
 totalPotSize :: Game -> Money
 totalPotSize g =
   let sumPlayerPots = sum (map playerPot (players g))
       sumSidePots   = sum (map snd (sidePots g))
-   in sumPlayerPots + sumSidePots
+   in sumPlayerPots + sumSidePots + pot g
 
 isNewGame :: Game -> Bool
 isNewGame g =
@@ -162,7 +163,7 @@ payBlinds g =
    in g { players = pls ++ [bet p1 sb,bet p2 bb]
         }
  where
-  bet p m = p { playerMoney = playerMoney p - m
+  bet p m = p { playerStack = playerStack p - m
               , playerPot = playerPot p + m }
 
 

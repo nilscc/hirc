@@ -41,7 +41,7 @@ data Card = Card
     }
   deriving (Eq, Ord)
 
-data Hand = Hand
+newtype Hand = Hand
     { hCards :: [Card]
     }
 
@@ -78,7 +78,9 @@ rank h = let fs = [straightFlush, fourOfAKind, fullHouse, flush, straight, three
           in listToMaybe $ mapMaybe (\f -> f h) fs
 
 straightFlush :: Hand -> Maybe Rank
-straightFlush (Hand cs) = guard (notNull cs && sameSuite cs && consValues cs) >> (Just $ StraightFlush (maximum cs))
+straightFlush (Hand cs) = do
+  guard $ notNull cs && sameSuite cs && consValues cs
+  return $ StraightFlush (maximum cs)
 
 fourOfAKind :: Hand -> Maybe Rank
 fourOfAKind (Hand cs) = do
@@ -92,10 +94,14 @@ fullHouse (Hand cs) = do
     return $ FullHouse (cValue c)
 
 flush :: Hand -> Maybe Rank
-flush h@(Hand cs) = guard (notNull cs && sameSuite cs) >> (Just $ Flush (fromJust $ highCard h))
+flush h@(Hand cs) = do
+  guard (notNull cs && sameSuite cs)
+  return $ Flush (fromJust $ highCard h)
 
 straight :: Hand -> Maybe Rank
-straight (Hand cs) = guard (notNull cs && consValues cs) >> (Just $ Straight (maximum cs))
+straight (Hand cs) = do
+  guard (notNull cs && consValues cs)
+  return $ Straight (maximum cs)
 
 threeOfAKind :: Hand -> Maybe Rank
 threeOfAKind (Hand cs) = do
@@ -114,7 +120,9 @@ pair (Hand cs) = do
     return $ Pair (cValue c) (reverse $ sort $ filter (not . (`elem` cs')) cs)
 
 highCard :: Hand -> Maybe Rank
-highCard (Hand cs) = guard (notNull cs) >> (Just $ HighCard (reverse $ sort $ map cValue cs))
+highCard (Hand cs) = do
+  guard $ notNull cs
+  return $ HighCard $ reverse $ sort $ map cValue cs
 
 
 sortAndGroup :: [Card] -> [[Card]]
@@ -175,10 +183,17 @@ toHand s = Hand <$> if length cards == 5 then Just cards else Nothing
 -- ♠️♣️♥️♦️
 instance Show Suite where
     show s = case s of
-               Clubs -> "♣️" -- "C"
-               Diamonds -> "♦️" -- "D"
-               Hearts -> "♥️" -- "H"
-               Spades -> "♠️" --"S"
+               Clubs -> "C"
+               Diamonds -> "D"
+               Hearts -> "H"
+               Spades -> "S"
+
+showSuiteUnicode :: Suite -> String
+showSuiteUnicode s = case s of
+  Clubs -> "♣️" -- "C"
+  Diamonds -> "♦️" -- "D"
+  Hearts -> "♥️" -- "H"
+  Spades -> "♠️" --"S"
 
 instance Show Value where
     show v = case v of
@@ -191,12 +206,15 @@ instance Show Value where
 instance Show Card where
     show c = show (cValue c) ++ show (cSuite c)
 
+showUnicode :: Card -> [Char]
+showUnicode c = show (cValue c) ++ showSuiteUnicode (cSuite c)
+
 instance Show Hand where
-    show h = intercalate " " $ map show (hCards h)
+    show h = unwords $ map show (hCards h)
 
 colorCard :: Card -> String
 colorCard c =
-  "\STX\ETX" ++ colorcode ++ " " ++ show c ++ " \SI"
+  "\STX\ETX" ++ colorcode ++ " " ++ showUnicode c ++ " \SI"
  where
   colorcode = case cSuite c of
                    Clubs    -> "01,00"

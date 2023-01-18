@@ -17,6 +17,7 @@ import Hirc
 import Hirc.Modules.Poker.Game
 import Hirc.Modules.Poker.Module
 import Hirc.Modules.Poker.Exception
+import Hirc.Modules.Poker.Bank (Bank, Money)
 
 
 --------------------------------------------------------------------------------
@@ -66,7 +67,22 @@ ignoreConst a es = handleP $ \e -> if e `elem` es then return a else throwP e
 
 
 --------------------------------------------------------------------------------
--- Ask/Update/Put
+-- Ask/Update/Put: Bank
+--
+
+askBank :: PokerSTM Bank
+askBank = bank <$> askPokerState
+
+updateBank :: (Bank -> Bank) -> PokerSTM ()
+updateBank f = updatePokerState $ \pokerState -> pokerState
+  { bank = f (bank pokerState)
+  }
+
+putBank :: Bank -> PokerSTM ()
+putBank b = updatePokerState $ \ps -> ps { bank = b }
+
+--------------------------------------------------------------------------------
+-- Ask/Update/Put: Poker Game
 --
 
 askNick :: PokerSTM NickName
@@ -172,9 +188,8 @@ askCurrentPot = maximum . map playerPot <$> askPlayers
 askLastRaise :: PokerSTM (Maybe (Position, Money))
 askLastRaise = lastRaise <$> askGame
 
-askToCall :: PokerSTM Money
-askToCall = do
-  pl <- askCurrentPlayer
+askToCall :: Player -> PokerSTM Money
+askToCall pl = do
   pot <- askCurrentPot
   return $ pot - playerPot pl
 
@@ -196,9 +211,9 @@ bet p m = do
   -- lookup player from game, as his money/pot might have be different
   case findPlayer g (playerUsername p) of
     Just p'
-      | playerMoney p' >= m -> do
+      | playerStack p' >= m -> do
         putPlayer p'
-          { playerMoney = playerMoney p' - m
+          { playerStack = playerStack p' - m
           , playerPot = playerPot p' + m
           }
       | otherwise -> throwP InsufficientFunds

@@ -5,7 +5,7 @@ module Hirc.Modules.Poker
   ( pokerModule
   ) where
 
-import Data.Time.Clock (UTCTime)
+import Data.Time.Clock (UTCTime, getCurrentTime)
 import Control.Monad (mzero, join, forM_, unless, when, guard)
 import Control.Monad.State
 import Control.Exception.Peel (handle, Exception, throw, SomeException (SomeException), catch)
@@ -32,6 +32,7 @@ import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Module
 import Hirc.Modules.Poker.STM
 import Hirc.Modules.Poker.Exception (PokerException(GameUpdateFailed))
+import Hirc.Modules.Poker.Bank (Loan(loanAmount, Loan, loanUTC), newLoan, withdraw, balance, Money)
 
 --------------------------------------------------------------------------------
 -- The main module
@@ -53,6 +54,49 @@ runPokerModule = handle pokerExceptions $ do
   -- handle nick changes of players
   onCommand "NICK" $ doneAfter updatePlayerNicknames
 
+  -- TODO: handle part/quit of players
+
+  runBankCommands
+  runPokerCommands
+ where
+  pokerExceptions :: SomeException -> PokerM ()
+  pokerExceptions e = do
+    msg <- getMessage
+    logM 1 $ "Exception on message: " ++ show e ++ "\n" ++ show msg
+
+runBankCommands :: PokerM ()
+runBankCommands = do
+  -- debug only:
+  userCommand $ \"bank" -> do
+    b <- runSTM askBank
+    logM 2 $ show b
+
+  userCommand $ \"bank" "balance"         -> doneAfter bankBalance
+  userCommand $ \"bank" "help"            -> doneAfter bankHelp
+
+  -- check if game is running currently
+  inGame <- runSTM userInGame
+  unless inGame $ do
+    userCommand $ \"bank" "loan"          -> doneAfter $ bankLoan defaultLoan
+
+  -- userCommand $ \"bank" "withdraw" amount -> doneAfter $
+  --   bankWithdraw $ Just (read amount)
+  -- userCommand $ \"bank" "withdraw"        -> doneAfter $ bankWithdraw Nothing
+
+  -- userCommand $ \"bank" "deposit" amount  -> doneAfter $
+  --   bankDeposit (Just $ read amount)
+  -- userCommand $ \"bank" "deposit"         -> doneAfter $ bankDeposit Nothing
+
+ 
+defaultLoan :: Money
+defaultLoan = 10000
+
+minimumBalanceForLoan :: Money
+minimumBalanceForLoan = 1000
+
+runPokerCommands :: PokerM ()
+runPokerCommands = do
+
   --
   -- START DEBUG
   --
@@ -61,10 +105,6 @@ runPokerModule = handle pokerExceptions $ do
     mg <- runSTM askMaybeGame
     logM 2 $ show mg
 
-  userCommand $ \"tc" -> doneAfter $ do
-    tc <- runSTM askToCall
-    logM 2 $ show tc
-
   --
   -- END DEBUG
   --
@@ -72,7 +112,7 @@ runPokerModule = handle pokerExceptions $ do
   userCommand $ \"poker" "help"     -> doneAfter showHelp
 
   userCommand $ \"players"          -> doneAfter showPlayers
-  userCommand $ \"money"            -> doneAfter showMoney
+  userCommand $ \"stack"            -> doneAfter showStack
 
   mg <- runSTM $ ignoreConst Nothing [NotInChannel] askMaybeGame
 
@@ -111,6 +151,10 @@ runPokerModule = handle pokerExceptions $ do
       currentPlayerOnlyGuard
       raise (read amount)
 
+    userCommand $ \"fold"          -> doneAfter $ do
+      currentPlayerOnlyGuard
+      fold'
+
   {-
   userCommand $ \"cards"          -> doneAfter showCurrentCards
   userCommand $ \"ca"             -> doneAfter showCurrentCards
@@ -120,11 +164,7 @@ runPokerModule = handle pokerExceptions $ do
   userCommand $ \"fold"           -> doneAfter fold
   userCommand $ \"all" "in"       -> doneAfter allIn
   -}
- where
-  pokerExceptions :: SomeException -> PokerM ()
-  pokerExceptions e = do
-    msg <- getMessage
-    logM 1 $ "Exception on message: " ++ show e ++ "\n" ++ show msg
+
 
 -- Help
 showHelp :: PokerM ()
@@ -203,17 +243,79 @@ showPlayers = do
    else
     say $ "Current players: " ++ intercalate ", " (map playerNickname (players g))
 
-showMoney :: PokerM ()
-showMoney = do
+showPot :: PokerM ()
+showPot = join . runSTM $ do
+  g <- askGame
+  p <- askPlayer
+  t <- askToCall p
+  return $ answer $
+    "You currently have " ++ show (playerPot p) ++ " in the pot"
+    ++ (if t > 0 then " (" ++ show t ++ " to call)" else "")
+    ++ ". (total pot size: " ++ show (totalPotSize g) ++ ")"
+
+showStack :: PokerM ()
+showStack = do
   p <- runSTM askPlayer
-  answer $ "You currently have " ++ show (playerMoney p) ++ " in your bank account"
+  answer $ "You currently have " ++ show (playerStack p) ++ " in your stack"
     ++ (if playerPot p > 0 then " and " ++ show (playerPot p) ++ " in the current pot" else "")
     ++ "."
 
-showPot :: PokerM ()
-showPot = do
-  g <- runSTM askGame
-  say $ "Current pot: " ++ show (potHeight g) ++ " (total: " ++ show (totalPotSize g) ++ ")"
+--------------------------------------------------------------------------------
+-- Bank commands
+--
+
+bankBalance :: PokerM ()
+bankBalance = withUsername $ \u -> 
+  join . runSTM $ do
+    b <- askBank
+    return $ answer $ "Your bank account balance is: " ++ show (balance u b)
+
+bankLoan :: Money -> PokerM ()
+bankLoan amount = withUsername $ \u -> do
+  now <- liftIO getCurrentTime
+  join $ runSTM $ do
+    -- check if balance is small enough
+    b <- askBank
+    let bal = balance u b
+    if bal <= minimumBalanceForLoan then do
+      let l = Loan { loanUTC = now, loanAmount = amount - bal }
+      updateBank $ newLoan u l
+      return $ answer $
+        "You loaned " ++ show (loanAmount l) ++ " from the bank."
+     else
+      return $ answer "You still have enough funds."
+
+-- bankWithdraw :: Maybe Money -> PokerM ()
+-- bankWithdraw mm = do
+--   u <- getUsername
+--   join . runSTM $ do
+--     b <- askBank
+--     case (mm, balance u b) of
+--       -- check if account balance is positive
+--       (_, bal) | bal <= 0 -> return $ answer $
+--         "You have nothing in your bank account. " ++
+--         "You may take out another loan if you have to."
+-- 
+--       -- check if balance is high enough to withdraw amount
+--       (Just m, bal)
+--         | m <= bal -> do
+--           putBank $ withdraw u m b
+--           return $ answer $
+--             "You withdrew " ++ show m ++ "from your bank account " ++
+--             "(new balance: " ++ show (bal - m) ++ ")."
+--         | otherwise -> do
+--           return $ answer "You don't have enough money in your bank account to do that."
+-- 
+--       -- withdraw everything
+--       (Nothing, bal) -> do
+--         putBank $ withdraw u bal b
+--         return $ answer $ "You withdrew " ++ show bal ++ " from your bank account."
+-- 
+-- bankDeposit :: Maybe Money -> PokerM ()
+-- bankDeposit _ = answer "Not implemented."
+
+bankHelp :: PokerM ()
+bankHelp = return ()
 
 
 --------------------------------------------------------------------------------
@@ -222,21 +324,32 @@ showPot = do
 
 playerJoin :: PokerM ()
 playerJoin = join . runSTM $ do
-
   ig <- userInGame
   if ig then
     return $ answer "You're already in the game!"
    else do
     n <- askNick
     u <- askUser
-    updateGame $ addPlayer' Player
-      { playerNickname = n
-      , playerUsername = u
-      , playerMoney = startingMoney -- TODO: load money from bank
-      , playerPot = 0
-      , playerHand = Nothing
-      }
-    return $ say $ "Player \"" ++ n ++ "\" joins the game."
+    -- check bank balance
+    b <- askBank
+    let bal = balance u b
+    if bal <= bigBlind then
+      return $ do
+        logM 2 $ show bal ++ " <= " ++ show bigBlind
+        answer $
+          "You don't have enough money to join the game. You need at least " ++ show bigBlind ++ "."
+     else do
+      -- withdraw all money from the bank and put it into the current game
+      putBank $ withdraw u bal b
+      -- add player to game
+      updateGame $ addPlayer' Player
+        { playerNickname = n
+        , playerUsername = u
+        , playerStack = bal
+        , playerPot = 0
+        , playerHand = Nothing
+        }
+      return $ say $ "Player \"" ++ n ++ "\" joins the game."
  where
   addPlayer' p g = g { players = players g ++ [p] }
 
@@ -368,11 +481,11 @@ showCurrentPlayer = do
 -}
 
 showCurrentPlayer :: PokerM ()
-showCurrentPlayer = do
-  (pl,tc) <- runSTM $ (,)
-    <$> askCurrentPlayer
-    <*> askToCall
-  say $ "Current player: " ++ playerNickname pl
+showCurrentPlayer = join . runSTM $ do
+  cp <- askCurrentPlayer
+  tc <- askToCall cp
+  return $ say $
+    "Current player: " ++ playerNickname cp
     ++ (if tc > 0 then " (" ++ show tc ++ " to call)" else "")
 
 showCurrentOrder :: PokerM ()
@@ -385,7 +498,7 @@ showCurrentOrder = do
          -- nick
         ++ playerNickname p
          -- (current pot/total wealth)
-        ++ " (" ++ show (playerPot p) ++ "/" ++ show (playerMoney p) ++ ")"
+        ++ " (" ++ show (playerPot p) ++ "/" ++ show (playerStack p) ++ ")"
 
   say $ "Currently playing: " ++ intercalate ", " (map formatNames order)
 
@@ -549,7 +662,7 @@ check' :: PokerM ()
 check' = do
   join . runSTM $ do
     pl <- askCurrentPlayer
-    tc <- askToCall
+    tc <- askToCall pl
     if tc == 0 then do
       nxt <- nextPlayer
       return $ do
@@ -561,10 +674,10 @@ check' = do
 call :: PokerM ()
 call = join . runSTM $ do
   pl <- askCurrentPlayer
-  tc <- askToCall
+  tc <- askToCall pl
 
   -- check if there is a positive amount to call and if player money is sufficient
-  if tc > 0 && playerMoney pl >= tc then do
+  if tc > 0 && playerStack pl >= tc then do
     bet pl tc
     nxt <- nextPlayer
     return $ do
@@ -572,9 +685,9 @@ call = join . runSTM $ do
       nxt
 
   -- player does not have enough money
-   else if playerMoney pl < tc then
+   else if playerStack pl < tc then
     return $ answer $ "You don't have enough money to do that. " ++
-      "To call: " ++ show tc ++ ", your wealth: " ++ show (playerMoney pl)
+      "To call: " ++ show tc ++ ", your wealth: " ++ show (playerStack pl)
 
   -- there is nothing to call
    else
@@ -583,7 +696,7 @@ call = join . runSTM $ do
 raise :: Money -> PokerM ()
 raise r = join . runSTM $ do
   pl <- askCurrentPlayer
-  tc <- askToCall
+  tc <- askToCall pl
 
   -- subtract both amount to call and the amount to raise from player money
   let tot = r + tc
@@ -595,7 +708,7 @@ raise r = join . runSTM $ do
     Just (_,lr)
       | r < lr -> return $ say $ "You must raise at least " ++ show lr
     -- check for sufficient funds
-    _ | playerMoney pl < tot ->
+    _ | playerStack pl < tot ->
           return $ say "You don't have enough money to do that."
     -- all good => execute raise
       | otherwise -> do
@@ -606,6 +719,25 @@ raise r = join . runSTM $ do
           return $ do
             say $ playerNickname pl ++ " raises the pot by " ++ show r ++ "."
             nxt
+
+fold' :: PokerM ()
+fold' = join . runSTM $ do
+  p <- askCurrentPlayer
+  updateGame $ \g -> g
+    { players = L.delete p (players g)
+    , currentPosition = currentPosition g `mod` length (players g) - 1
+    , pot = pot g + playerPot p
+    }
+  g <- askGame
+  e <- if length (players g) <= 1 then
+    endGame
+   else
+    return showCurrentPlayer
+  return $ do
+    say $ playerNickname p ++ " folds."
+    e
+ where
+  deleteAt i l = let (a,_:b) = splitAt i l in a ++ b
 
 {-
 
@@ -694,46 +826,64 @@ nextPlayer = do
       ((cp ==) . fst)
       mlr
 
-    np <- nextPhase g
-    return $ do
-      np
-      showCurrentPlayer
+    -- perform next phase
+    case g of
+      _
+        | Nothing <- flop g -> do
+          updateGame showFlop
+          g' <- askGame
+          case flop g' of
+            Just (a,b,c) -> return $ do
+              say $ "Flop: " ++ unwords (map colorCard [a,b,c])
+              showCurrentPlayer
+            _ -> return $ do
+              logM 1 $ "Flop failed: " ++ show g'
+              throw GameUpdateFailed
+        | Nothing <- turn g -> do
+          updateGame showTurn
+          g' <- askGame
+          case (flop g', turn g') of
+            (Just (a,b,c), Just d) -> return $ do
+              say $ "Turn: " ++ unwords (map colorCard [a,b,c]) ++ "  " ++ colorCard d
+              showCurrentPlayer
+            _ -> return $ do
+              logM 1 $ "Turn failed: " ++ show g'
+              throw GameUpdateFailed
+        | Nothing <- river g -> do
+          updateGame showRiver
+          g' <- askGame
+          case (flop g', turn g', river g') of
+            (Just (a,b,c), Just d, Just e) -> return $ do
+              say $ "Turn: " ++ unwords (map colorCard [a,b,c,d]) ++ "  " ++ colorCard e
+              showCurrentPlayer
+            _ -> return $ do
+              logM 1 $ "River failed: " ++ show g'
+              throw GameUpdateFailed
 
-  nextPhase g
-    | Nothing <- flop g = do
-      updateGame showFlop
-      g' <- askGame
-      case flop g' of
-        Just (a,b,c) -> return $ do
-          say $ "Flop: " ++ unwords (map colorCard [a,b,c])
-        _ -> return $ do
-          logM 1 $ "Flop failed: " ++ show g'
-          throw GameUpdateFailed
-    | Nothing <- turn g = do
-      updateGame showTurn
-      g' <- askGame
-      case (flop g', turn g') of
-        (Just (a,b,c), Just d) -> return $ do
-          say $ "Turn: " ++ unwords (map colorCard [a,b,c]) ++ "  " ++ colorCard d
-        _ -> return $ do
-          logM 1 $ "Turn failed: " ++ show g'
-          throw GameUpdateFailed
-    | Nothing <- river g = do
-      updateGame showRiver
-      g' <- askGame
-      case (flop g', turn g', river g') of
-        (Just (a,b,c), Just d, Just e) -> return $ do
-          say $ "Turn: " ++ unwords (map colorCard [a,b,c,d]) ++ "  " ++ colorCard e
-        _ -> return $ do
-          logM 1 $ "River failed: " ++ show g'
-          throw GameUpdateFailed
-      | otherwise = endGame
+        | otherwise -> endGame
 
 endGame :: PokerSTM (PokerM ())
 endGame = do
-  -- TODO!
-  return $ do
-    say "End of game!"
+  -- figure out player hand ranks
+  g <- askGame
+  let ranks = map (\p -> (p, rank <$> playerHand p)) (players g)
+
+  -- TODO: deposit stacks into bank accounts
+
+  -- reset game
+  putGame newGame
+
+  if length (players g) > 1 then do
+    return $ do
+      say "Showdown! These are the players hands:"
+      forM_ (players g) $ \p@Player{ playerHand = Just h }->
+        say $ "  " ++ playerNickname p ++ ": " ++ unwords (map showUnicode (hCards h))
+   else do
+    return $ do
+      say $
+        playerNickname (head $ players g) ++ " wins the game. " ++
+        "Pot size: " ++ show (totalPotSize g)
+    
 
 {-
 nextPlayer :: MessageM ()
