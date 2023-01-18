@@ -2,6 +2,7 @@ module Hirc.Modules.Poker.Cards
     (
       -- * Ranking API
       rank
+    , findBestHand
       -- * Input parsing
     , toHand
     , toCard
@@ -24,6 +25,7 @@ import Control.Monad
 import Data.Function
 import Data.Maybe
 import Data.List
+import qualified Data.Set as Set
 
 
 --------------------------------------------------------------------------------
@@ -145,6 +147,8 @@ sameSuite cs = let ss = map cSuite cs in all ((==) $ head ss) ss
 notNull :: [a] -> Bool
 notNull = not . null
 
+findBestHand :: [Card] -> Maybe Hand
+findBestHand = Set.lookupMax . Set.fromList . map (Hand . sort . take 5) . permutations
 
 --------------------------------------------------------------------------------
 -- Input
