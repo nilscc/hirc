@@ -140,6 +140,7 @@ runPokerCommands = do
     userCommand $ \"turn"           -> doneAfter showCurrentPlayer
     userCommand $ \"order"          -> doneAfter showCurrentOrder
     userCommand $ \"hand"           -> doneAfter showHand
+    userCommand $ \"cards"          -> doneAfter showCards
 
     userCommand $ \"check"          -> doneAfter $ do
       currentPlayerOnlyGuard
@@ -157,16 +158,7 @@ runPokerCommands = do
       currentPlayerOnlyGuard
       fold'
 
-  {-
-  userCommand $ \"cards"          -> doneAfter showCurrentCards
-  userCommand $ \"ca"             -> doneAfter showCurrentCards
-
-  userCommand $ \"bet"   amount   -> doneAfter $ raise amount
-  --userCommand $ \"fold" "now"     -> doneAfter fold'
-  userCommand $ \"fold"           -> doneAfter fold
-  userCommand $ \"all" "in"       -> doneAfter allIn
-  -}
-
+    --userCommand $ \"all" "in"       -> doneAfter allIn
 
 -- Help
 showHelp :: PokerM ()
@@ -180,11 +172,12 @@ showHelp = do
   whisper "While playing:"
   whisper "    check/call/fold           --   check, call the current bet or fold your cards"
   whisper "    raise <num>               --   bet a new sum (at least big blind or the amount of the last raise)"
-  whisper "    all in                    --   go all in"
+  -- whisper "    all in                    --   go all in"
   whisper "    pot                       --   show current pot"
-  whisper "    order                     --   show current order"
-  whisper "    cards                     --   show your own and all community cards"
+  whisper "    stack                     --   show your current stack"
+  whisper "    hand                      --   show your hand"
   whisper "    turn                      --   show whose turn it currently is"
+  whisper "    order                     --   show current order"
 
 
 --------------------------------------------------------------------------------
@@ -419,6 +412,18 @@ showHand' p
     withNickAndUser $ \n u ->
       logM 1 $ "No hand found: " ++ show p ++ " (" ++ n ++ " / " ++ u ++ ")"
 
+showCards :: PokerM ()
+showCards = do
+  g <- runSTM askGame
+  case g of
+    _ | Just (a,b,c) <- flop g, Just t <- turn g, Just r <- river g -> do
+        say $ "River: " ++ unwords (map colorCard [a,b,c,t,r])
+      | Just (a,b,c) <- flop g, Just t <- turn g, Nothing <- river g -> do
+        say $ "Turn: " ++ unwords (map colorCard [a,b,c,t])
+      | Just (a,b,c) <- flop g, Nothing <- turn g, Nothing <- river g -> do
+        say $ "Flop: " ++ unwords (map colorCard [a,b,c])
+      | otherwise -> do
+        answer "No cards have been played yet."
 
 --------------------------------------------------------------------------------
 -- Play
@@ -606,35 +611,13 @@ nextPlayer = do
     case g of
       _ | Nothing <- flop g -> do
           updateGame showFlop
-          g' <- askGame
-          case flop g' of
-            Just (a,b,c) -> return $ do
-              say $ "Flop: " ++ unwords (map colorCard [a,b,c])
-              showCurrentPlayer
-            _ -> return $ do
-              logM 1 $ "Flop failed: " ++ show g'
-              throw GameUpdateFailed
+          return $ showCards >> showCurrentPlayer
         | Nothing <- turn g -> do
           updateGame showTurn
-          g' <- askGame
-          case (flop g', turn g') of
-            (Just (a,b,c), Just d) -> return $ do
-              say $ "Turn: " ++ unwords (map colorCard [a,b,c]) ++ "  " ++ colorCard d
-              showCurrentPlayer
-            _ -> return $ do
-              logM 1 $ "Turn failed: " ++ show g'
-              throw GameUpdateFailed
+          return $ showCards >> showCurrentPlayer
         | Nothing <- river g -> do
           updateGame showRiver
-          g' <- askGame
-          case (flop g', turn g', river g') of
-            (Just (a,b,c), Just d, Just e) -> return $ do
-              say $ "Turn: " ++ unwords (map colorCard [a,b,c,d]) ++ "  " ++ colorCard e
-              showCurrentPlayer
-            _ -> return $ do
-              logM 1 $ "River failed: " ++ show g'
-              throw GameUpdateFailed
-
+          return $ showCards >> showCurrentPlayer
         | otherwise -> endGame
 
 endGame :: PokerSTM (PokerM ())
@@ -675,7 +658,7 @@ endGame = do
           -- single winner takes it all
           [(p,Just h)] | Just r <- rank h -> do
             updateBank $ deposit (playerUsername p) pot
-            return $ say $ playerNickname p ++ " wins the game with: " ++ show r
+            return $ say $ playerNickname p ++ " wins the pot of size " ++ show pot ++ " with: " ++ show r
 
           -- multiple winners share the pot
           ((p, Just h):_) | Just r <- rank h -> do
