@@ -34,6 +34,7 @@ import Hirc.Modules.Poker.STM
 import Hirc.Modules.Poker.Exception (PokerException(GameUpdateFailed))
 import Hirc.Modules.Poker.Bank (Loan(loanAmount, Loan, loanUTC), newLoan, withdraw, balance, Money, deposit)
 import Data.List.Extra (groupOn)
+import Data.Ord (Down(Down))
 
 --------------------------------------------------------------------------------
 -- The main module
@@ -900,7 +901,7 @@ endGame = do
             -- figure out best hand
             ranks = map (\p -> (p, findBestHand . (cc ++) . hCards =<< playerHand p)) (players g)
             -- get winner(s) and winning hand(s)
-            (winners:_) = groupOn snd $ sortOn snd ranks
+            (winners:_) = groupOn snd $ sortOn (Down . snd) ranks
 
         result <- case winners of
 
