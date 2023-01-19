@@ -32,7 +32,8 @@ import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Module
 import Hirc.Modules.Poker.STM
 import Hirc.Modules.Poker.Exception (PokerException(GameUpdateFailed))
-import Hirc.Modules.Poker.Bank (Loan(loanAmount, Loan, loanUTC), newLoan, withdraw, balance, Money)
+import Hirc.Modules.Poker.Bank (Loan(loanAmount, Loan, loanUTC), newLoan, withdraw, balance, Money, deposit)
+import Data.List.Extra (groupOn)
 
 --------------------------------------------------------------------------------
 -- The main module
@@ -722,12 +723,19 @@ raise r = join . runSTM $ do
 
 fold' :: PokerM ()
 fold' = join . runSTM $ do
+
+  -- remove current player from game
   p <- askCurrentPlayer
   updateGame $ \g -> g
     { players = L.delete p (players g)
-    , currentPosition = currentPosition g `mod` length (players g) - 1
+    , currentPosition = currentPosition g `mod` (length (players g) - 1)
     , pot = pot g + playerPot p
     }
+
+  -- put stack back into bank account
+  updateBank $ deposit (playerUsername p) (playerStack p)
+
+  -- check how to continue game
   g <- askGame
   e <- if length (players g) <= 1 then
     endGame
@@ -828,8 +836,7 @@ nextPlayer = do
 
     -- perform next phase
     case g of
-      _
-        | Nothing <- flop g -> do
+      _ | Nothing <- flop g -> do
           updateGame showFlop
           g' <- askGame
           case flop g' of
@@ -866,120 +873,63 @@ endGame :: PokerSTM (PokerM ())
 endGame = do
   -- figure out player hand ranks
   g <- askGame
-  let ranks = map (\p -> (p, rank <$> playerHand p)) (players g)
 
-  -- TODO: deposit stacks into bank accounts
+  -- TODO: handle side pots
+  let pot = totalPotSize g
 
+  forM_ (players g) $ \p -> updateBank $ deposit (playerUsername p) (playerStack p)
   -- reset game
   putGame newGame
 
-  if length (players g) > 1 then do
-    return $ do
-      say "Showdown! These are the players hands:"
-      forM_ (players g) $ \p@Player{ playerHand = Just h }->
-        say $ "  " ++ playerNickname p ++ ": " ++ unwords (map colorCard (hCards h))
-   else do
-    return $ do
-      say $
-        playerNickname (head $ players g) ++ " wins the game. " ++
-        "Pot size: " ++ show (totalPotSize g)
-    
+  case players g of
 
-{-
-nextPlayer :: MessageM ()
-nextPlayer = do
-  mo' <- load "order"
-  if fmap lengthList mo' <= Just 1 then
-     endGame
-   else do
-     update "order" $ \mo ->
-       case mo of
-           Just l | Just (f :: UserName) <- headList l ->
-                appendList (tailList l) (singletonList f)
-           _ -> emptyList -- shouldn't happen anyway
-     mc  <- getCurrentPlayer
-     mlr <- load "last raise" :: MessageM (Maybe (Maybe UserName, Money))
-     mgs <- load "round started by"
-     let playerIsLastRaise    = fmap fst mlr == Just (fmap snd mc)
-         playerHasStartedGame = Nothing == join (fmap fst mlr) && mgs == fmap snd mc
-     when (playerIsLastRaise || playerHasStartedGame) nextPhase
+    -- last player wins the game
+    [p] -> do
+      updateBank $ deposit (playerUsername p) pot
+      return $ do
+        say $
+          playerNickname (head $ players g) ++ " wins the game. " ++
+          "Pot size: " ++ show (totalPotSize g)
+   
+    _ | Just (f1,f2,f3) <- flop g
+      , Just t <- turn g
+      , Just r <- river g -> do
 
-nextPhase :: MessageM ()
-nextPhase = do
-  s <- load "state"
-  case s of
-       Just "preflop" -> flop
-       Just "flop"    -> turn
-       Just "turn"    -> river
-       Just "river"   -> showdown
+        let -- community cards
+            cc = [f1,f2,f3,t,r]
+            -- figure out best hand
+            ranks = map (\p -> (p, findBestHand . (cc ++) . hCards =<< playerHand p)) (players g)
+            -- get winner(s) and winning hand(s)
+            (winners:_) = groupOn snd $ sortOn snd ranks
 
+        result <- case winners of
 
---------------------------------------------------------------------------------
--- Phase transitions
+          -- single winner takes it all
+          [(p,Just h)] | Just r <- rank h -> do
+            updateBank $ deposit (playerUsername p) pot
+            return $ say $ playerNickname p ++ " wins the game with: " ++ show r
 
-burnCard :: MessageM ()
-burnCard = update "cards" $ maybe emptyList tailList
+          -- multiple winners share the pot
+          ((p, Just h):_) | Just r <- rank h -> do
+            let n = length winners
+            forM_ winners $ \(p,_) -> do
+              updateBank $ deposit (playerUsername p) (pot `div` fromIntegral n)
+            return $ say $
+              "Split pot! The amount of " ++ show pot ++ " is split between: " ++
+              intercalate ", " (map (playerNickname . fst) winners) ++ ". " ++
+              "Winning hand: " ++ show r
 
-takeCard :: MessageM Card
-takeCard = do
-  Just (Just (Just c)) <- fmap (fmap toCard . headList) `fmap` load "cards"
-  update "cards" $ maybe emptyList tailList
-  return c
+          -- catch errors
+          _ -> return $ do
+            logM 1 $ "No winner?! " ++ show g
+            throw GameUpdateFailed
 
--- start round with first position player
-startFromFirstPosition :: MessageM ()
-startFromFirstPosition = do
-  Just (fp :: UserName) <- load "first position"
-  store "round started by" fp
-  let skip = do Just (_,cp) <- getCurrentPlayer
-                unless (cp == fp) (nextPlayer >> skip)
-  skip
-  update "last raise" $ \(Just (_,lr)) ->
-    ((Nothing :: Maybe UserName), (lr :: Integer))
+        return $ do
+          say "Showdown! These are the players hands:"
+          forM_ (players g) $ \p@Player{ playerHand = Just h }->
+            say $ "  " ++ playerNickname p ++ ": " ++ unwords (map colorCard (hCards h))
+          result
 
-flop :: MessageM ()
-flop = require "state" "preflop" $ do
-  say "First betting round ends."
-  store "state" "flop"
-  burnCard
-  c1 <- takeCard
-  c2 <- takeCard
-  c3 <- takeCard
-  let fcs = map show [c1,c2,c3]
-  store "flop" $ Just (toList fcs)
-  showCommunityCards
-  startFromFirstPosition
-
-turn :: MessageM ()
-turn = require "state" "flop" $ do
-  say "Second betting round ends."
-  store "state" "turn"
-  -- pick turn card
-  burnCard
-  tc <- takeCard
-  let tcs = show tc
-  store "turn" $ (Just tcs)
-  -- show cards
-  showCommunityCards
-  startFromFirstPosition
-
-river :: MessageM ()
-river = require "state" "turn" $ do
-  say "Third betting round ends. This is the last betting round!"
-  store "state" "river"
-  -- pick river card
-  burnCard
-  rc <- takeCard
-  let rcs = show rc
-  store "river" $ (Just rcs)
-  -- show cards
-  showCommunityCards
-  startFromFirstPosition
-
-showdown :: MessageM ()
-showdown = require "state" "river" $ do
-  say "Showdown!"
-  startFromFirstPosition
-  endGame
-
--}
+    _ -> return $ do
+      logM 1 $ "End game failed: " ++ show g
+      throw GameUpdateFailed

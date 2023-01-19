@@ -174,7 +174,8 @@ showFlop :: Game -> Game
 showFlop = showF . burnCard
  where
   showF g
-    | (a:b:c:_) <- deck g
+    -- always "burn" the first card
+    | (_:a:b:c:_) <- deck g
     , Nothing <- flop g
     , Nothing <- turn g
     , Nothing <- river g = g
@@ -187,7 +188,8 @@ showTurn :: Game -> Game
 showTurn = showT . burnCard
  where
   showT g
-    | (a:_) <- deck g
+    -- always "burn" the first card
+    | (_:a:_) <- deck g
     , Just _ <- flop g
     , Nothing <- turn g
     , Nothing <- river g = g
@@ -200,7 +202,8 @@ showRiver :: Game -> Game
 showRiver = showR . burnCard
  where
   showR g
-    | (a:_) <- deck g
+    -- always "burn" the first card
+    | (_:a:_) <- deck g
     , Just _ <- flop g
     , Just _ <- turn g
     , Nothing <- river g = g

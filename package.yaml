@@ -21,6 +21,7 @@ library:
     - regex-posix
     - monad-peel
     - random
+    - extra
 
 executables:
   app:
