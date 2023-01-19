@@ -175,7 +175,6 @@ showHelp = do
   whisper "    poker help                --   show this help"
   whisper "    poker join                --   join a new game"
   whisper "    poker leave               --   leave the current game"
-  whisper "    money                     --   show your current wealth"
   whisper "    players                   --   show who is playing in the next game"
   whisper "    deal                      --   deal cards, start a new game"
   whisper "While playing:"
@@ -385,103 +384,6 @@ updatePlayerNicknames = withParams $ \[newNick] -> runSTM $ do
   updatePokerState $ \pokerState -> 
     pokerState { games = M.map updateNick (games pokerState) }
 
-
-{-
-showMoney :: MessageM ()
-showMoney = withUsername $ \u -> do
-  wealth <- loadMoney u
-  answer $ "Your current wealth is " ++ show wealth ++ "."
-
-loadMoney :: UserName -> MessageM Integer
-loadMoney u = do
-  mmo <- loadGlobal "money"
-  case mmo of
-       Just mo | Just wealth <- lookupMap u mo ->
-         return wealth
-       _ -> do
-         -- add the starting money if the current player has no money at all
-         updateGlobal "money" $ \mmo' ->
-           case mmo' of
-               Just mo
-                 | memberMap u mo -> mo
-                 | otherwise ->
-                   insertMap u startingMoney mo
-               Nothing ->
-                   singletonMap u startingMoney
-         return startingMoney
-
-getCurrentOrder :: MessageM (Maybe [(NickName, UserName, Integer, Integer)])
-getCurrentOrder = do
-  mo <- load "order"
-  case mo of
-       Just o | Just order <- fromList o -> do
-         nicks <- fmap (map fromJust)                  $ mapM getPlayerNickname (order)
-         mons  <- fmap (map $ fromMaybe startingMoney) $ mapM getPlayerWealth   (order)
-         pot   <- fmap (map $ fromMaybe 0)             $ mapM getPlayerPot      (order)
-         return $ Just $ zip4 nicks order mons pot
-       _ -> return Nothing
-
-getPlayerNickname :: UserName -> MessageM (Maybe NickName)
-getPlayerNickname u = do
-  mps <- load "players"
-  return $
-    case mps of
-         Just ps -> lookupMap u ps
-         _       -> Nothing
-
-getPlayerWealth :: UserName -> MessageM (Maybe Integer)
-getPlayerWealth u = do
-  loadGlobal "money" ~> u
-
-getPlayerPot :: UserName -> MessageM (Maybe Integer)
-getPlayerPot u = do
-  load "pot" ~> u
-
-getPotMax :: MessageM (Maybe Integer)
-getPotMax = do
-  fmap getMax `fmap` load "pot"
- where
-  getMax = maximum . elemsMap
-
-getAmountToCall :: UserName -> MessageM Integer
-getAmountToCall u = do
-  mp <- getPlayerPot u
-  mx <- getPotMax
-  return $ fromMaybe 0 mx - fromMaybe 0 mp
-
-showCurrentOrder :: MessageM ()
-showCurrentOrder = do
-  mo <- getCurrentOrder
-  mfp <- load "first position"
-  let formatNames (n,u,w,p) =
-        (if Just u == mfp then "*" else "")  -- first player indication
-        ++ n  -- nick
-        ++ " (" ++ show p ++ "/" ++ show w ++ ")"  -- (current pot/total wealth)
-
-  case mo of
-       Just nicks -> say $ "Currently playing: " ++ intercalate ", " (map formatNames nicks)
-       Nothing    -> say "Cannot figure out current order – sorry!"
- where
-
-showCurrentPlayer :: MessageM ()
-showCurrentPlayer = do
-  cur <- getCurrentPlayer
-  s   <- load "state"
-  case cur of
-       Just (n,u) -> do
-         mp <- load "pot"
-         let p  = fromMaybe (singletonMap "" (0 :: Integer)) mp
-             mx, up, tc :: Integer
-             mx = maximum (elemsMap p)
-             up = fromMaybe mx (lookupMap u p)
-             tc = mx - up
-         say $ "It's " ++ n ++ "s turn" ++ if tc > 0 then " (" ++ show tc ++ " to call)." else "."
-       Nothing | s == Nothing || s == Just "end" ->
-         say "No one is playing at the moment."
-       Nothing ->
-         endGame
--}
-
 showCurrentPlayer :: PokerM ()
 showCurrentPlayer = join . runSTM $ do
   cp <- askCurrentPlayer
@@ -516,89 +418,6 @@ showHand' p
   | otherwise =
     withNickAndUser $ \n u ->
       logM 1 $ "No hand found: " ++ show p ++ " (" ++ n ++ " / " ++ u ++ ")"
-
-{-
-showCurrentCards :: MessageM ()
-showCurrentCards = withUsername $ \u -> do
-  showCommunityCards
-  showPlayerCards u
-
-showPlayerCards :: UserName -> MessageM ()
-showPlayerCards u = do
-  mn <- getPlayerNickname u
-  mh <- getPlayerCards u
-  case (mn, mh) of
-       (Just n, Just hand) -> sendNotice n $ "Your hand: " ++ intercalate " " (map colorCard hand)
-       _                   -> return ()
-
-showCommunityCards :: MessageM ()
-showCommunityCards = do
-  ccs <- getCommunityCards
-  case ccs of
-       (Just (c1,c2,c3), Nothing, Nothing) ->
-         say $ "Flop cards: " ++ intercalate " " (map colorCard [c1,c2,c3])
-       (Just (c1,c2,c3), Just tc, Nothing) ->
-         say $ "Turn cards: " ++ intercalate " " (map colorCard [c1,c2,c3]) ++ "  " ++ colorCard tc
-       (Just (c1,c2,c3), Just tc, Just rc) ->
-         say $ "River cards: " ++ intercalate " " (map colorCard [c1,c2,c3]) ++ "  " ++ colorCard tc ++ "  " ++ colorCard rc
-       _ ->
-         say "There are no community cards yet."
-
-getPlayerCards :: UserName -> MessageM (Maybe [Card])
-getPlayerCards u = do
-  mr <- load "hands" ~> u
-  return $
-    case mr of
-         Just (fromList -> Just l) -> fmap sort $ sequence $ map toCard l
-         _ -> Nothing
-
-getCommunityCards :: MessageM (Maybe (Card,Card,Card), Maybe Card, Maybe Card)
-getCommunityCards = do
-  -- load flop cards
-  mfres <- load "flop"
-  --Just (Just fl) <- load "flop"
-  --let Just fcs = fromList fl
-  let fcs = do fres       <- mfres
-               fl         <- fres
-               [s1,s2,s3] <- fromList fl
-               c1         <- toCard s1
-               c2         <- toCard s2
-               c3         <- toCard s3
-               return (c1,c2,c3)
-  -- load turn card
-  mtres <- load "turn"
-  let tc = do tres <- mtres
-              ts   <- tres
-              toCard ts
-  -- load river card
-  mrres <- load "river"
-  let rc = do rres <- mrres
-              rs   <- rres
-              toCard rs
-  return (fcs, tc, rc)
-  
-
---------------------------------------------------------------------------------
--- Setting up the game environment
-
-{ -
-startGame :: MessageM ()
-startGame = withNickAndUser $ \n u -> do
-  state <- load "state"
-  if (state == Nothing || state == Just "end") then do
-    answerTo $ \who ->
-      case who of
-           Left  _ -> answer "Sorry, but this game needs to be run in a public channel."
-           Right _ -> do
-             store "state" "new game"
-             store "game started by" u
-             hirc <- getNickname
-             say $ "Poker game started by " ++ n ++ ". Say \"" ++ hirc ++ ": join poker\" to join this game."
-             addPlayer n u
-   else do
-    answer "Poker game already in progress. You can play only one game per channel."
--}
-
 
 
 --------------------------------------------------------------------------------
@@ -748,61 +567,9 @@ fold' = join . runSTM $ do
  where
   deleteAt i l = let (a,_:b) = splitAt i l in a ++ b
 
-{-
-
-fold :: MessageM ()
-fold = requireCurrentPlayer $ do
-  fold'
-  nextPlayer
-
-fold' :: MessageM ()
-fold' = do
-  withNickAndUser $ \n u -> do
-    say $ n ++ " folds."
-    update "order" $
-      maybe emptyMap (deleteMap u)
-    showCurrentPlayer
-
-allIn :: MessageM ()
-allIn = undefined
-
-endGame :: MessageM ()
-endGame = do
-  say "Ending game."
-  store "state" "end"
-  delete "flop"
-  delete "turn"
-  delete "river"
-  delete "hands"
-  delete "cards"
-  delete "last raise"
-  delete "pot"
-  delete "order"
-  done
-
-requireCurrentPlayer :: MessageM () -> MessageM ()
-requireCurrentPlayer m = withUsername $ \u -> do
-  mc <- getCurrentPlayer
-  case mc of
-       Just (_,u') | u == u' -> m
-       _                     -> answer "It's not your turn."
-
 
 --------------------------------------------------------------------------------
 -- Organizing players & cards
-
-getCurrentPlayer :: MessageM (Maybe (NickName, UserName))
-getCurrentPlayer = do
-  mo <- load "order"
-  mp <- load "players"
-  return $
-    case (mo, mp) of
-         (Just o, Just p)
-           | Just u <- headList o
-           , Just n <- lookupMap u p ->
-             Just (n,u)
-         _ -> Nothing
--}
 
 incPosition :: PokerSTM ()
 incPosition = updateGame $ \g -> g

@@ -189,7 +189,7 @@ sendCmd' cmd = do
 
 -- | Reply in a query to the user of the current message
 whisper :: CanSend m => String -> m ()
-whisper = withNickname . whisperTo
+whisper msg = withNickname $ \n -> whisperTo n msg
 
 whisperTo :: CanSend m => NickName -> String -> m ()
 whisperTo to txt = sendCmd' $ PrivMsg to (T.pack txt)
