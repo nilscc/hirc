@@ -297,9 +297,7 @@ joinCmd chan = do
 
 -- irc commands: pong
 pongCmd :: (CanSend m, ContainsLogInstance m) => [String] -> m ()
-pongCmd params = do
-  logM 4 $ "PING? PONG! " ++ show params
-  sendCmd' $ Pong params
+pongCmd params = sendCmd' $ Pong params
 
 -- CTCP stuff
 isCTCP :: String -> Bool
