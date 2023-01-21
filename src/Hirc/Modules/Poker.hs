@@ -35,6 +35,7 @@ import Hirc.Modules.Poker.Exception (PokerException(GameUpdateFailed))
 import Hirc.Modules.Poker.Bank (Loan(loanAmount, Loan, loanUTC), newLoan, withdraw, balance, Money, deposit)
 import Data.List.Extra (groupOn)
 import Data.Ord (Down(Down))
+import System.Random.Shuffle (shuffleM, shuffle')
 
 --------------------------------------------------------------------------------
 -- The main module
@@ -192,19 +193,6 @@ askStdGen = do
       sg <- liftIO initStdGen
       runSTM $ updateGame $ \g -> g { stdGen = Just sg }
       return sg
-
-shuffle :: StdGen -> [a] -> [a]
-shuffle sg ls = do
-  execState `flip` ls $
-    forM_ [1..length ls-1] $ \i -> do
-      let j = randomRs (0,i) sg !! i
-      modify $ swap j i
- where
-  swap j i l =
-    let lj = l !! j
-        li = l !! i
-     in replace i lj (replace j li l)
-  replace n y xs = take n xs ++ [y] ++ drop (n+1) xs
 
 
 --------------------------------------------------------------------------------
@@ -430,14 +418,15 @@ showCards = do
 
 deal :: PokerM ()
 deal = do
-  sg <- askStdGen
+  sg1 <- askStdGen
+  sg2 <- askStdGen
   join . runSTM . (`orElse` return (answer "Waiting for more players to join.")) $ do
 
     -- Shuffle player order and card deck
-    updateGame $ \g -> g
-      { players = shuffle sg (players g)
-      , deck = shuffle sg fullDeck
-      }
+    g <- askGame
+    let pls = shuffle' (players g) (length $ players g) sg1
+        dck = shuffle' fullDeck (length fullDeck) sg2
+    putGame $ g { players = pls, deck = dck }
 
     pls <- askPlayers
     check $ length pls >= 2
