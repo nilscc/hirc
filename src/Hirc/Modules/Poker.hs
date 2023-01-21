@@ -341,6 +341,7 @@ playerQuit = handle playerNotFound $ do
   join . runSTM $ do
     p <- askPlayer
     if isNothing (playerHand p) then do
+      updateBank $ deposit (playerUsername p) (playerStack p)
       updateGame $ \g -> g
         { players = L.filter
             ((playerUsername p /=) . playerUsername)
