@@ -54,3 +54,5 @@ tests:
       - hirc
       - base
       - hspec
+      - hspec-expectations
+      - random
