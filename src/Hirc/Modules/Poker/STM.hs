@@ -7,7 +7,7 @@ import qualified Data.Map as M
 import qualified Data.List as L
 import Data.Maybe (isJust, isNothing)
 import Control.Concurrent.STM
-    ( TVar, STM, catchSTM, readTVar, retry, throwSTM, modifyTVar )
+    ( TVar, STM, catchSTM, readTVar, retry, throwSTM, modifyTVar, writeTVar, catchSTM )
 import qualified Control.Concurrent.STM as STM
 import Control.Monad (unless, when)
 import Control.Monad.Trans (lift, liftIO)
@@ -20,6 +20,7 @@ import Hirc.Modules.Poker.Module
 import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Bank (Bank, Money)
 import Control.Monad.Random (StdGen, RandomGen (split))
+import Data.Either (fromLeft)
 
 
 --------------------------------------------------------------------------------
@@ -37,8 +38,9 @@ orElse a b = do
   r <- R.ask
   lift $ STM.orElse (runReaderT a r) (runReaderT b r)
 
-checkSTM :: Bool -> PokerSTM ()
-checkSTM = lift . STM.check
+checkP :: Bool -> PokerSTM ()
+checkP = lift . STM.check
+
 
 --------------------------------------------------------------------------------
 -- STM Exception handling
@@ -55,18 +57,6 @@ catchP m h = do
 handleP :: (PokerException -> PokerSTM a) -> PokerSTM a -> PokerSTM a
 handleP = flip catchP
 
-handlePE :: PokerException -> (PokerException -> PokerSTM a) -> PokerSTM a -> PokerSTM a
-handlePE e = handlePEs [e]
-
-handlePEs :: [PokerException] -> (PokerException -> PokerSTM a) -> PokerSTM a -> PokerSTM a
-handlePEs es h = handleP $ \e' -> if e' `elem` es then h e' else throwP e'
-
-ignore :: [PokerException] -> PokerSTM () -> PokerSTM ()
-ignore = ignoreConst ()
-
-ignoreConst :: a -> [PokerException] -> PokerSTM a -> PokerSTM a
-ignoreConst a es = handleP $ \e -> if e `elem` es then return a else throwP e
-
 
 --------------------------------------------------------------------------------
 -- Bank
@@ -82,6 +72,7 @@ updateBank f = updatePokerState $ \pokerState -> pokerState
 
 putBank :: Bank -> PokerSTM ()
 putBank b = updatePokerState $ \ps -> ps { bank = b }
+
 
 --------------------------------------------------------------------------------
 -- Poker state
@@ -112,6 +103,11 @@ askPokerState = do
   (tvar,_,_,_) <- R.ask
   lift $ readTVar tvar
 
+putPokerState :: PokerState -> PokerSTM ()
+putPokerState ps = do
+  (tvar,_,_,_) <- R.ask
+  lift $ writeTVar tvar ps
+
 updatePokerState :: (PokerState -> PokerState) -> PokerSTM ()
 updatePokerState f = do
   (tvar,_,_,_) <- R.ask
@@ -122,41 +118,70 @@ updatePokerState f = do
 -- Game state
 --
 
--- | Update game if exists, or create a new game for current channel if none
--- have been started before.
-updateGame' :: (Game StdGen -> Maybe (Game StdGen)) -> PokerSTM ()
-updateGame' f = do
-  chan <- requireChan
-  updatePokerState $ \pokerState ->
-    if M.member chan (games pokerState) then
-      pokerState { games = M.update f chan (games pokerState) }
-     else
-      let (g1,g2) = split $ stdGen pokerState
-      in case f (newGame g1) of
-        Just g -> pokerState
-          { games = M.insert chan g (games pokerState)
-          , stdGen = g2
-          }
-        Nothing -> pokerState
 
-updateGame :: (Game StdGen -> Game StdGen) -> PokerSTM ()
-updateGame f = updateGame' $ Just . f
+askGameState :: PokerSTM GameState
+askGameState = do
+  ps <- askPokerState
+  ch <- requireChan
+  case M.lookup ch (games ps) of
+    Just s -> return s
+    Nothing -> do
+      let (g1,g2) = split $ stdGen ps
+          s = Left $ newGame g1
+      putPokerState ps
+        { games = M.insert ch s (games ps)
+        , stdGen = g2
+        }
+      return s
 
-putGame :: Game StdGen -> PokerSTM ()
-putGame g = do
+putGameState :: GameState -> PokerSTM ()
+putGameState s = do
   chan <- requireChan
   updatePokerState $ \ps -> ps
-    { games = M.insert chan g (games ps) }
+    { games = M.insert chan s (games ps) }
 
-askMaybeGame :: PokerSTM (Maybe (Game StdGen))
-askMaybeGame = do
+
+askMaybeGameState :: PokerSTM (Maybe GameState)
+askMaybeGameState = do
   ps <- askPokerState
   ch <- requireChan
   return $ M.lookup ch (games ps)
 
+askMaybeGame :: PokerSTM (Maybe (Game StdGen))
+askMaybeGame = do
+  ms <- askMaybeGameState
+  return $ case ms of
+    Just (Left g) -> Just g
+    _             -> Nothing
+
+askMaybeGameResult :: PokerSTM (Maybe GameResult)
+askMaybeGameResult = do
+  ms <- askMaybeGameState
+  return $ case ms of
+    Just (Right r) -> Just r
+    _              -> Nothing
+
 askGame :: PokerSTM (Game StdGen)
 askGame = maybe (lift retry) return =<< askMaybeGame
 
+putGame :: Game StdGen -> PokerSTM ()
+putGame = putGameState . Left
+
+-- | Update game if exists, or create a new game for current channel if none
+-- have been started before.
+updateGame :: (Game StdGen -> GameUpdate StdGen) -> PokerSTM ()
+updateGame f = do
+  s <- askGameState
+  case either f GameEnded s of
+    GameUpdated g'     -> putGame g'
+    GameEnded res      -> putGameState $ Right res
+    GameUpdateFailed e -> lift $ throwSTM e
+
+askGameResult :: PokerSTM GameResult
+askGameResult = maybe (lift retry) return =<< askMaybeGameResult
+
+putGameResult :: GameResult -> PokerSTM ()
+putGameResult = putGameState . Right
 
 --------------------------------------------------------------------------------
 -- Players
@@ -172,7 +197,7 @@ updatePlayer :: UserName -> (Player -> Player) -> PokerSTM ()
 updatePlayer u f = do
   g <- askGame
   unless (isJust $ findPlayer u g) $
-    throwP PlayerNotFound
+    lift retry
   putGame g
     { players = map (\p -> if playerUsername p == u then f p else p) (players g)
     }
@@ -220,19 +245,3 @@ askCurrentOrder = toOrder <$> askGame
 
 askFirstPosition :: PokerSTM Player
 askFirstPosition = (!! 0) . players <$> askGame
-
-bet :: Player -> Money -> PokerSTM ()
-bet p m = do
-  g <- askGame
-
-  -- check if player has enough money.
-  -- lookup player from game, as his money/pot might have be different
-  case findPlayer (playerUsername p) g of
-    Just p'
-      | playerStack p' >= m -> do
-        putPlayer p'
-          { playerStack = playerStack p' - m
-          , playerPot = playerPot p' + m
-          }
-      | otherwise -> throwP InsufficientFunds
-    _ -> throwP PlayerNotFound

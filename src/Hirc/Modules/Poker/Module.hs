@@ -9,8 +9,10 @@ import Hirc.Modules.Poker.Bank
 import Hirc.Modules.Poker.Game
 import Control.Monad.Random (StdGen, getStdGen)
 
+type GameState = Either (Game StdGen) GameResult
+
 data PokerState = PokerState
-  { games :: M.Map ChannelName (Game StdGen)
+  { games :: M.Map ChannelName GameState
   , bank :: Bank
   , stdGen :: StdGen
   }
