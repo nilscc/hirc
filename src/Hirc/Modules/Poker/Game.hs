@@ -50,7 +50,7 @@ data Game g = Game
   { players           :: [Player]
   , currentPosition   :: Position
 
-  , lastRaise         :: Maybe (Position, Money)
+  , lastRaise         :: Maybe ((Position, UserName), Money)
 
   , blinds            :: (Money, Money) -- small/big blind
   , pot               :: Money
@@ -243,9 +243,13 @@ check g
   | otherwise     = throw GameUpdateFailed
 
 raise :: Money -> Game g -> GameUpdate g
-raise m g = next . incPosition $ g' { lastRaise = Just (currentPosition g, m)}
+raise m g = next . incPosition $ g'
+  { lastRaise = Just ((pos, usr), m)
+  }
  where
   g' = bet (toCall g + m) g
+  pos = currentPosition g
+  usr = playerUsername $ players g !! pos
 
 fold :: Game g -> GameUpdate g
 fold g =
@@ -254,18 +258,28 @@ fold g =
    else
     next g'
  where
+  -- remove current player from players list
   (xs,p:ys) = splitAt (currentPosition g) (players g)
   players' = xs ++ ys
-  -- update game with new player list and increment position.
-  -- move player pot into community pot. move position of last raise.
+
+  -- keep current position, but potentially move it back to 0 if the last player
+  -- folded
+  pos' = currentPosition g `mod` length players'
+
+  -- There are four main steps to folding:
+  --  * Update game with new player list
+  --  * Update position (mod it by new number of players)
+  --  * Move player pot into community pot.
+  --  * Move position of last raise if necessary.
   g' = g
     { players = players'
-    , currentPosition = currentPosition g `mod` length players'
+    , currentPosition = pos'
     , pot = pot g + playerPot p
     , lastRaise = do
-        (pos,plr) <- lastRaise g
-        let pos' = if pos <= currentPosition g then pos else pos - 1
-        return (pos' `mod` length players', plr)
+        -- check if last raise was *before* current raise and subtract 1 from its position
+        ((pos,usr),plr) <- lastRaise g
+        let pos' = if currentPosition g < pos then pos - 1 else pos
+        return ((pos' `mod` length players', usr), plr)
     }
 
 allIn :: Game g -> GameUpdate g
@@ -282,12 +296,17 @@ next g
   | otherwise = case lastRaise g of
       Nothing
         | 0 == currentPosition g -> incPhase g
-      Just (pos,_)
-        | pos == currentPosition g -> incPhase g
+      Just ((lpos, lu), mon)
+        | lpos == currentPosition g -> 
+          if lu == cu then
+            incPhase g
+           else
+            Left g { lastRaise = Just ((lpos, cu), mon ) }
       _ -> Left g
  where
   ps = players g
   n  = length ps
+  cu = playerUsername $ ps !! currentPosition g
 
 endGame :: Game g -> GameResult
 endGame _ = GameResult { pots = [] }

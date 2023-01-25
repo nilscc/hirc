@@ -488,7 +488,10 @@ raise r = joinSTM $ do
       | otherwise -> do
           bet pl tot
           newPot <- askCurrentPot
-          updateGame $ \g -> g { lastRaise = Just (currentPosition g, r) }
+          g <- askGame
+          let pos = currentPosition g
+              usr = playerUsername $ players g !! pos
+          updateGame $ \g -> g { lastRaise = Just ((pos, usr), r) }
           nxt <- nextPlayer
           return $ do
             say $ playerNickname pl ++ " raises the pot by " ++ show r ++ "."
@@ -543,8 +546,10 @@ nextPlayer = do
  where
   endPhase = do
     g <- askGame
+
     let mlr = lastRaise g
         cp = currentPosition g
+        cu = playerUsername $ players g !! cp
         np = length $ players g -- number of players
 
     -- end phase only if:
@@ -552,7 +557,7 @@ nextPlayer = do
       -- there was no raise yet and current position is first player after big blind
       (cp == 0)
       -- or current position is last raise
-      ((cp ==) . fst)
+      (((cp, cu) ==) . fst)
       mlr
 
     -- perform next phase

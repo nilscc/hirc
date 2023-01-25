@@ -203,7 +203,7 @@ isCurrentPlayer = do
 askCurrentPot :: PokerSTM Money
 askCurrentPot = maximum . map playerPot <$> askPlayers
 
-askLastRaise :: PokerSTM (Maybe (Position, Money))
+askLastRaise :: PokerSTM (Maybe ((Position, UserName), Money))
 askLastRaise = lastRaise <$> askGame
 
 askToCall :: Player -> PokerSTM Money

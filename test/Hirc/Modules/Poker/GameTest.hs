@@ -17,10 +17,10 @@ import Hirc.Modules.Poker.Game (Game(communityCards))
 newPlayer' n = newPlayer n n 10000
 
 -- First 4 players
-p1 = newPlayer' "p1"
-p2 = newPlayer' "p2"
-p3 = newPlayer' "p3"
-p4 = newPlayer' "p4"
+p1 = newPlayer' "p0"
+p2 = newPlayer' "p1"
+p3 = newPlayer' "p2"
+p4 = newPlayer' "p3"
 
 -- Continue playing
 cont :: Show a => (Game a -> GameUpdate a) -> Game a -> Game a
@@ -115,18 +115,21 @@ foldSpec = describe "fold" $ do
     currentPosition g `shouldBe` 3
     communityCards g `shouldSatisfy` \(Flop _) -> True
 
+    -- get list of players
+    let [p0,p1,p2,p3] = players g
+
     -- raise was done in 3rd position (counting from 0)
-    lastRaise g `shouldBe` Just (2,500)
+    lastRaise g `shouldBe` Just ((2, playerUsername p2), 500)
 
     -- fold in last position
     let g'1 = fold' g
     currentPosition g'1 `shouldBe` 0
-    lastRaise g'1 `shouldBe` Just (2,500)
+    lastRaise g'1 `shouldBe` Just ((2, playerUsername p2), 500)
 
     -- fold in first position
     let g'2 = fold' $ call' g
     currentPosition g'2 `shouldBe` 0
-    lastRaise g'2 `shouldBe` Just (1,500)
+    lastRaise g'2 `shouldBe` Just ((1, playerUsername p2), 500)
 
     ---------------------------------------------------------
     -- perform fold in position of last raise (in next phase)
@@ -140,11 +143,11 @@ foldSpec = describe "fold" $ do
     -- perform the fold
     let g'4 = fold' g'3
     currentPosition g'4 `shouldBe` 2
-    lastRaise g'4 `shouldBe` Just (2,500)
+    lastRaise g'4 `shouldBe` Just ((2, playerUsername p3), 500)
     -- it should not switch phase yet
     communityCards g'4 `shouldSatisfy` \(Turn _) -> True
 
-    -- -- make all remaining players check until next phase
-    -- let g'5 = check' . check' . check' $ g'4
-    -- currentPosition g'5 `shouldBe` 2
-    -- communityCards g'5 `shouldSatisfy` \(River _) -> True
+    -- make all remaining players check until next phase
+    let g'5 = check' . check' . check' $ g'4
+    currentPosition g'5 `shouldBe` 2
+    communityCards g'5 `shouldSatisfy` \(River _) -> True
