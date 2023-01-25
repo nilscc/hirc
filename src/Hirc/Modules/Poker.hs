@@ -358,7 +358,7 @@ showStatus = do
     showCards False
   showCurrentPlayer
 
-showCommunityCards :: Game a -> PokerM ()
+showCommunityCards :: Game -> PokerM ()
 showCommunityCards g = do
   case communityCards g of
     PreFlop -> return ()

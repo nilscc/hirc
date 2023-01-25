@@ -19,7 +19,7 @@ import Hirc.Modules.Poker.Game
 import Hirc.Modules.Poker.Module
 import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Bank (Bank, Money)
-import Control.Monad.Random (StdGen, RandomGen (split))
+import Control.Monad.Random (RandomGen (split))
 import Data.Either (fromLeft)
 
 
@@ -147,7 +147,7 @@ askMaybeGameState = do
   ch <- requireChan
   return $ M.lookup ch (games ps)
 
-askMaybeGame :: PokerSTM (Maybe (Game StdGen))
+askMaybeGame :: PokerSTM (Maybe Game)
 askMaybeGame = do
   ms <- askMaybeGameState
   return $ case ms of
@@ -161,15 +161,15 @@ askMaybeGameResult = do
     Just (Right r) -> Just r
     _              -> Nothing
 
-askGame :: PokerSTM (Game StdGen)
+askGame :: PokerSTM Game
 askGame = maybe (lift retry) return =<< askMaybeGame
 
-putGame :: Game StdGen -> PokerSTM ()
+putGame :: Game -> PokerSTM ()
 putGame = putGameState . Left
 
 -- | Update game if exists, or create a new game for current channel if none
 -- have been started before.
-updateGame :: (Game StdGen -> GameUpdate StdGen) -> PokerSTM ()
+updateGame :: (Game -> GameUpdate) -> PokerSTM ()
 updateGame f = do
   s <- askGameState
   case either f GameEnded s of

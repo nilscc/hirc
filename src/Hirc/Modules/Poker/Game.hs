@@ -2,7 +2,7 @@ module Hirc.Modules.Poker.Game where
 
 import Control.Exception
 import Data.Maybe (isJust, isNothing)
-import Data.List (find, filter)
+import Data.List (find, filter, sortOn)
 import System.Random (StdGen, RandomGen, split)
 
 import Hirc
@@ -11,6 +11,8 @@ import Hirc.Modules.Poker.Cards
 import Hirc.Modules.Poker.Bank (Money)
 import Control.Monad.IO.Class (MonadIO)
 import System.Random.Shuffle (shuffle')
+import Data.List.Extra (groupOn)
+import Data.Ord (Down(Down))
 
 --------------------------------------------------------------------------------
 -- Settings
@@ -46,7 +48,7 @@ data CommunityCards
   | River (FlopCards, TurnCard, RiverCard)
   deriving (Eq, Show)
 
-data Game g = Game
+data Game = Game
   { players           :: [Player]
   , currentPosition   :: Position
 
@@ -58,32 +60,34 @@ data Game g = Game
 
   , deck              :: [Card]
   , communityCards    :: CommunityCards
-  , rndGen            :: g
+  , rndGen            :: StdGen
   }
   deriving (Eq, Show)
 
-newtype GameResult = GameResult
-  { pots :: [(Money, [Player])]
-  }
+data GameResult
+  = WinnerTakesItAll Rank [Player]
+  | ShowDown
+    { pots :: [(Money, [Player])]
+    }
   deriving (Show, Eq)
 
-data GameUpdate g
-  = GameUpdated      (Game g)
+data GameUpdate
+  = GameUpdated      Game
   | GameEnded        GameResult
   | GameUpdateFailed PokerException
   deriving (Show)
 
-ok :: Game g -> GameUpdate g
+ok :: Game -> GameUpdate
 ok = GameUpdated
 
-failed :: PokerException -> GameUpdate g
+failed :: PokerException -> GameUpdate
 failed = GameUpdateFailed
 
-onOK :: (Game g -> GameUpdate g) -> GameUpdate g -> GameUpdate g
+onOK :: (Game -> GameUpdate) -> GameUpdate -> GameUpdate
 onOK f (GameUpdated g) = f g
 onOK _ gu = gu
 
-newGame :: RandomGen g => g -> Game g
+newGame :: StdGen -> Game
 newGame gen = Game
   { players = []
   , currentPosition = 0
@@ -103,7 +107,7 @@ newGame gen = Game
 -- Queries
 --
 
-isNewGame :: Game g -> Bool
+isNewGame :: Game -> Bool
 isNewGame g =
   PreFlop == communityCards g &&
   all (isNothing . playerHand) (players g) &&
@@ -111,7 +115,7 @@ isNewGame g =
   null (sidePots g) &&
   currentPosition g == 0
 
-isPreFlop :: Game g -> Bool
+isPreFlop :: Game -> Bool
 isPreFlop g
   | PreFlop <- communityCards g
   = all (maybe False ((2 ==) . length . hCards) . playerHand) (players g) &&
@@ -119,42 +123,42 @@ isPreFlop g
   | otherwise
   = False
 
-isFlop :: Game g -> Bool
+isFlop :: Game -> Bool
 isFlop g
   | Flop _ <- communityCards g
   = all (maybe False ((2 ==) . length . hCards) . playerHand) (players g) &&
     totalPotSize g >= (snd (blinds g) * fromIntegral(length (players g)))
   | otherwise = False
 
-isTurn :: Game g -> Bool
+isTurn :: Game -> Bool
 isTurn g
   | Turn _ <- communityCards g
   = all (maybe False ((2 ==) . length . hCards) . playerHand) (players g) &&
     totalPotSize g >= (snd (blinds g) * fromIntegral(length (players g)))
   | otherwise = False
 
-isRiver :: Game g -> Bool
+isRiver :: Game -> Bool
 isRiver g
   | River _ <- communityCards g
   = all (maybe False ((2 ==) . length . hCards) . playerHand) (players g) &&
     totalPotSize g >= (snd (blinds g) * fromIntegral(length (players g)))
   | otherwise = False
 
-isActiveGame :: Game g -> Bool
+isActiveGame :: Game -> Bool
 isActiveGame g = isPreFlop g || isFlop g || isTurn g || isRiver g
 
 --------------------------------------------------------------------------------
 -- Player management
 --
 
-findPlayer :: UserName -> Game g -> Maybe Player
+findPlayer :: UserName -> Game -> Maybe Player
 findPlayer u g =
   find ((u ==) . playerUsername) (players g)
 
-currentPlayer :: Game g -> Player
+currentPlayer :: Game -> Player
 currentPlayer g = players g !! currentPosition g
 
-updateCurrentPlayer :: (Player -> Player) -> Game g -> Game g
+updateCurrentPlayer :: (Player -> Player) -> Game -> Game
 updateCurrentPlayer f g =
   let (l, p:r) = splitAt (currentPosition g) (players g)
    in g { players = l ++ f p : r }
@@ -173,17 +177,17 @@ newPlayer nick user balance = Player
   , playerHand = Nothing
   }
 
-joinPlayer :: Player -> Game g -> GameUpdate g
+joinPlayer :: Player -> Game -> GameUpdate
 joinPlayer p g = ok g
   { players = players g ++ [ p { playerPot = 0, playerHand = Nothing }]
   }
 
-partPlayer :: Player -> Game g -> GameUpdate g
+partPlayer :: Player -> Game -> GameUpdate
 partPlayer p g = ok g
   { players = filter ((playerUsername p /=) . playerUsername) (players g)
   }
 
-dealCards :: RandomGen g => Game g -> GameUpdate g
+dealCards :: Game -> GameUpdate
 dealCards g 
   | n < 2 = failed NotEnoughPlayers
   | otherwise = ok g
@@ -207,7 +211,7 @@ dealCards g
   -- give each player their hand
   players' = [ p { playerHand = Just h } | (p,h) <- zip (players g) hands ]
 
-payBlinds :: Game g -> GameUpdate g
+payBlinds :: Game -> GameUpdate
 payBlinds g 
   | (p1:p2:pls) <- players g
   = ok $ g { players = pls ++ [bet p1 sb,bet p2 bb] }
@@ -222,22 +226,22 @@ payBlinds g
 -- During game
 --
 
-mainPotHeight :: Game g -> Money
+mainPotHeight :: Game -> Money
 mainPotHeight g = maximum $ map playerPot (players g)
 
-totalPotSize :: Game g -> Money
+totalPotSize :: Game -> Money
 totalPotSize g =
   let sumPlayerPots = sum (map playerPot (players g))
       sumSidePots   = sum (map snd (sidePots g))
    in sumPlayerPots + sumSidePots + pot g
 
-toCall :: Game g -> Money
+toCall :: Game -> Money
 toCall g = mainPotHeight g - playerPot p
  where
   p = currentPlayer g
 
 
-bet :: Money -> Game g -> GameUpdate g
+bet :: Money -> Game -> GameUpdate
 bet m g
   | playerStack p < m = failed InsufficientFunds
     { need = m
@@ -251,25 +255,25 @@ bet m g
   p = currentPlayer g
 
 -- | Increment current position to next player
-incPosition :: Game g -> Game g
+incPosition :: Game -> Game
 incPosition g = g
   { currentPosition = (currentPosition g + 1) `mod` length (players g) }
 
-call :: Game g -> GameUpdate g
+call :: Game -> GameUpdate
 call g
   | tc == 0   = failed CheckInstead
   | otherwise = onOK (next . incPosition) $ bet tc g
  where
   tc = toCall g
 
-check :: Game g -> GameUpdate g
+check :: Game -> GameUpdate
 check g
   | tc == 0   = next $ incPosition g
   | otherwise = failed $ CallFirst tc
  where
   tc = toCall g
 
-raise :: Money -> Game g -> GameUpdate g
+raise :: Money -> Game -> GameUpdate
 raise m g
   -- check if raise is below last raise
   | Just (_,lr) <- lastRaise g
@@ -286,7 +290,7 @@ raise m g
   pos = currentPosition g
   usr = playerUsername $ currentPlayer g
 
-fold :: Game g -> GameUpdate g
+fold :: Game -> GameUpdate
 fold g =
   if length players' <= 1 then
     GameEnded $ endGame g'
@@ -317,7 +321,7 @@ fold g =
         return ((pos' `mod` length players', usr), plr)
     }
 
-allIn :: Game g -> GameUpdate g
+allIn :: Game -> GameUpdate
 allIn g = undefined
 
 --------------------------------------------------------------------------------
@@ -325,7 +329,7 @@ allIn g = undefined
 --
 
 -- | Check if next phase is to be started
-next :: Game g -> GameUpdate g
+next :: Game -> GameUpdate
 next g
   | n <= 1 = GameEnded $ endGame g
   | otherwise = case lastRaise g of
@@ -343,10 +347,7 @@ next g
   n  = length ps
   cu = playerUsername $ currentPlayer g
 
-endGame :: Game g -> GameResult
-endGame _ = GameResult { pots = [] }
-
-incPhase :: Game g -> GameUpdate g
+incPhase :: Game -> GameUpdate
 incPhase g = case communityCards g of
   PreFlop    -> ok showFlop
   Flop f     -> ok $ showTurn f
@@ -360,11 +361,24 @@ incPhase g = case communityCards g of
   showTurn  f   = g { deck = b:c:r, communityCards = Turn (f,a) } 
   showRiver f t = g { deck = b:c:r, communityCards = River (f,t,a) } 
 
-isNextPhase :: Game g -> Bool
+isNextPhase :: Game -> Bool
 isNextPhase g = case (currentPosition g, lastRaise g) of
   (0, Nothing) -> True
   (p, Just ((l,u),_)) ->
     p == l && playerUsername (currentPlayer g) == u
+
+--------------------------------------------------------------------------------
+-- End game
+--
+
+endGame :: Game -> GameResult
+endGame g = case winners of
+  ((p, Just h):_) | Just r <- rank h -> WinnerTakesItAll r (map fst winners)
+ where
+  River ((f1,f2,f3),t,r) = communityCards g
+  cc = [f1,f2,f3,t,r]
+  ranks = map (\p -> (p, findBestHand . (cc ++) . hCards =<< playerHand p)) (players g)
+  (winners:_) = groupOn snd $ sortOn (Down . snd) ranks
 
 
 --------------------------------------------------------------------------------
@@ -375,7 +389,7 @@ isNextPhase g = case (currentPosition g, lastRaise g) of
 {-# DEPRECATED showTurn  "Use check/call/raise/fold/allIn instead" #-}
 {-# DEPRECATED showRiver "Use check/call/raise/fold/allIn instead" #-}
 
-showFlop :: Game g -> GameUpdate g
+showFlop :: Game -> GameUpdate
 showFlop g
   -- always "burn" the first card
   | (_:a:b:c:dck) <- deck g
@@ -383,7 +397,7 @@ showFlop g
   = ok g { deck = dck, communityCards = Flop (a,b,c) }
   | otherwise = failed WrongGameState
 
-showTurn :: Game g -> GameUpdate g
+showTurn :: Game -> GameUpdate
 showTurn g
   -- always "burn" the first card
   | (_:t:dck) <- deck g
@@ -391,7 +405,7 @@ showTurn g
   = ok g { deck = dck, communityCards = Turn (fc, t) }
   | otherwise = failed WrongGameState
 
-showRiver :: Game g -> GameUpdate g
+showRiver :: Game -> GameUpdate
 showRiver g
   -- always "burn" the first card
   | (_:r:dck)   <- deck g
