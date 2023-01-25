@@ -144,7 +144,7 @@ runPokerCommands = do
     userCommand $ \"turn"           -> doneAfter showCurrentPlayer
     userCommand $ \"order"          -> doneAfter showCurrentOrder
     userCommand $ \"hand"           -> doneAfter showHand
-    userCommand $ \"cards"          -> doneAfter showCards
+    userCommand $ \"cards"          -> doneAfter $ showCards True
 
     userCommand $ \"check"          -> doneAfter $ do
       currentPlayerOnlyGuard
@@ -351,31 +351,33 @@ updatePlayerNicknames = withParams $ \[newNick] -> runSTM $ do
   updatePokerState $ \pokerState -> 
     pokerState { games = M.map updateNick (games pokerState) }
 
-showCurrentPlayer :: PokerM ()
-showCurrentPlayer = joinSTM $ do
-  g <- askGame
-  let cp  = currentPlayer g
-      tc  = toCall g
+showStatus :: PokerM ()
+showStatus = do
+  g <- runSTM askGame
+  when (isNextPhase g) $ do
+    showCards False
+  showCurrentPlayer
 
-  return $ do
-    case (currentPosition g, lastRaise g) of
-      (0, Nothing) ->
-        showCommunityCards g
-      (p, Just ((r,u),_)) | p == r && u == playerUsername cp ->
-        showCommunityCards g
-      _ -> return ()
-    say $
-      "Current player: " ++ playerNickname cp
-      ++ (if tc > 0 then " (" ++ show tc ++ " to call)" else "")
- where
-  showCommunityCards g = case communityCards g of
-    PreFlop -> return () --answer "No cards have been played yet."
+showCommunityCards :: Game a -> PokerM ()
+showCommunityCards g = do
+  case communityCards g of
+    PreFlop -> return ()
     Flop (a,b,c) -> say $
       "Flop: " ++ unwords (map colorCard [a,b,c])
     Turn ((a,b,c),t) -> say $
       "Turn: " ++ unwords (map colorCard [a,b,c,t])
     River ((a,b,c),t,r) -> say $
       "River: " ++ unwords (map colorCard [a,b,c,t,r])
+
+showCurrentPlayer :: PokerM ()
+showCurrentPlayer = do
+  g <- runSTM askGame
+  let cp  = currentPlayer g
+      tc  = toCall g
+  say $
+    "Current player: " ++ playerNickname cp
+    ++ (if tc > 0 then " (" ++ show tc ++ " to call)" else "")
+
 
 showCurrentOrder :: PokerM ()
 showCurrentOrder = do
@@ -404,11 +406,12 @@ showHand' p
     withNickAndUser $ \n u ->
       logM 1 $ "No hand found: " ++ show p ++ " (" ++ n ++ " / " ++ u ++ ")"
 
-showCards :: PokerM ()
-showCards = do
+showCards :: Bool -> PokerM ()
+showCards showNoCards = do
   g <- runSTM askGame
   case communityCards g of
-    PreFlop -> answer "No cards have been played yet."
+    PreFlop -> when showNoCards $
+      answer "No cards have been played yet."
     Flop (a,b,c) -> say $
       "Flop: " ++ unwords (map colorCard [a,b,c])
     Turn ((a,b,c),t) -> say $
@@ -464,7 +467,7 @@ check' = handlePokerExceptions $ do
   updateGame check
   return $ do
     say $ playerNickname pl ++ " checks."
-    showCurrentPlayer
+    showStatus
 
 call' :: PokerM ()
 call' = handlePokerExceptions $ do
@@ -472,7 +475,7 @@ call' = handlePokerExceptions $ do
   updateGame call
   return $ do
     say $ playerNickname pl ++ " calls."
-    showCurrentPlayer
+    showStatus
 
 
 raise' :: Money -> PokerM ()
@@ -481,7 +484,7 @@ raise' m = handlePokerExceptions $ do
   updateGame $ raise m
   return $ do
     say $ playerNickname pl ++ " raises the pot by " ++ show m
-    showCurrentPlayer
+    showStatus
 
 fold' :: PokerM ()
 fold' = joinSTM $ do
@@ -489,7 +492,7 @@ fold' = joinSTM $ do
   updateGame fold
   return $ do
     say $ playerNickname p ++ " folds!"
-    showCurrentPlayer
+    showStatus
 
 
 --------------------------------------------------------------------------------

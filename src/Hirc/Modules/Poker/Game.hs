@@ -360,6 +360,12 @@ incPhase g = case communityCards g of
   showTurn  f   = g { deck = b:c:r, communityCards = Turn (f,a) } 
   showRiver f t = g { deck = b:c:r, communityCards = River (f,t,a) } 
 
+isNextPhase :: Game g -> Bool
+isNextPhase g = case (currentPosition g, lastRaise g) of
+  (0, Nothing) -> True
+  (p, Just ((l,u),_)) ->
+    p == l && playerUsername (currentPlayer g) == u
+
 
 --------------------------------------------------------------------------------
 -- LEGACY UPDATES: TODO DELETE
