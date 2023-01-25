@@ -260,6 +260,113 @@ showStack = do
     ++ (if playerPot p > 0 then " and " ++ show (playerPot p) ++ " in the current pot" else "")
     ++ "."
 
+showStatus :: PokerM ()
+showStatus = do
+  s <- runSTM askGameState
+  case s of
+    Left g -> do
+      when (isNextPhase g) $ do
+        showCards False
+      showCurrentPlayer
+    Right lm@LastManTakesItAll{} -> do
+      lastMan lm
+      runSTM resetGame
+    Right sd@Showdown{} -> do
+      showdown sd
+      runSTM resetGame
+ where
+  lastMan (LastManTakesItAll p m) = do
+    say $ playerNickname p ++ " wins the pot: " ++ show m
+    runSTM $ do
+      updateBank $ deposit (playerUsername p) (playerStack p + m)
+
+  showdown (Showdown ps m (wr,ws)) = do
+    say "Game ended. Showdown!"
+
+    -- show all cards with ranks
+    let maxl = maximum $ map (length . playerNickname . fst) ps
+    forM_ ps $ \(p,r) -> do
+      let Just h = playerHand p
+          pad = replicate (maxl - length (playerNickname p)) ' '
+      say $ "  " ++ playerNickname p ++ ": " ++ pad ++ unwords (map colorCard (hCards h))
+        ++ " - " ++ show r
+
+    -- return stack to all and pay out price to winning players
+    let price = m `div` fromIntegral (length ws)
+    runSTM $ do
+      forM_ ps $ \(p,_) -> do
+        updateBank $ deposit (playerUsername p) (playerStack p)
+      forM_ ws $ \p -> do
+        updateBank $ deposit (playerUsername p) price
+
+    -- show final game message
+    case ws of
+      [p] -> say $ playerNickname p ++ " wins the pot of size " ++ show price
+        ++ " (" ++ show wr ++ ")"
+      _ -> say $ "Split pot! The pot of size " ++ show m ++ " is split up between: " ++
+        intercalate ", " (map playerNickname ws) ++ " (" ++ show wr ++ ")"
+
+
+showCommunityCards :: Game -> PokerM ()
+showCommunityCards g = do
+  case communityCards g of
+    PreFlop -> return ()
+    Flop (a,b,c) -> say $
+      "Flop: " ++ unwords (map colorCard [a,b,c])
+    Turn ((a,b,c),t) -> say $
+      "Turn: " ++ unwords (map colorCard [a,b,c,t])
+    River ((a,b,c),t,r) -> say $
+      "River: " ++ unwords (map colorCard [a,b,c,t,r])
+
+showCurrentPlayer :: PokerM ()
+showCurrentPlayer = do
+  g <- runSTM askGame
+  let cp  = currentPlayer g
+      tc  = toCall g
+  say $
+    "Current player: " ++ playerNickname cp
+    ++ (if tc > 0 then " (" ++ show tc ++ " to call)" else "")
+
+
+showCurrentOrder :: PokerM ()
+showCurrentOrder = do
+  (order, fpos) <- runSTM $ (,) <$> askCurrentOrder <*> askFirstPosition
+
+  let formatNames p =
+         -- first player indication
+        (if p == fpos then "*" else "")
+         -- nick
+        ++ playerNickname p
+         -- (current pot/total wealth)
+        ++ " (" ++ show (playerPot p) ++ "/" ++ show (playerStack p) ++ ")"
+
+  say $ "Currently playing: " ++ intercalate ", " (map formatNames order)
+
+showHand :: PokerM ()
+showHand = do
+  p <- runSTM askPlayer
+  showHand' p
+
+showHand' :: Player -> PokerM ()
+showHand' p
+  | Just (Hand hand) <- playerHand p =
+    sendNoticeTo (playerNickname p) $ "Your hand: " ++ unwords (map colorCard hand)
+  | otherwise =
+    withNickAndUser $ \n u ->
+      logM 1 $ "No hand found: " ++ show p ++ " (" ++ n ++ " / " ++ u ++ ")"
+
+showCards :: Bool -> PokerM ()
+showCards showNoCards = do
+  g <- runSTM askGame
+  case communityCards g of
+    PreFlop -> when showNoCards $
+      answer "No cards have been played yet."
+    Flop (a,b,c) -> say $
+      "Flop: " ++ unwords (map colorCard [a,b,c])
+    Turn ((a,b,c),t) -> say $
+      "Turn: " ++ unwords (map colorCard [a,b,c,t])
+    River ((a,b,c),t,r) -> say $
+      "River: " ++ unwords (map colorCard [a,b,c,t,r])
 
 --------------------------------------------------------------------------------
 -- Bank commands
@@ -351,74 +458,6 @@ updatePlayerNicknames = withParams $ \[newNick] -> runSTM $ do
   updatePokerState $ \pokerState -> 
     pokerState { games = M.map updateNick (games pokerState) }
 
-showStatus :: PokerM ()
-showStatus = do
-  g <- runSTM askGame
-  when (isNextPhase g) $ do
-    showCards False
-  showCurrentPlayer
-
-showCommunityCards :: Game -> PokerM ()
-showCommunityCards g = do
-  case communityCards g of
-    PreFlop -> return ()
-    Flop (a,b,c) -> say $
-      "Flop: " ++ unwords (map colorCard [a,b,c])
-    Turn ((a,b,c),t) -> say $
-      "Turn: " ++ unwords (map colorCard [a,b,c,t])
-    River ((a,b,c),t,r) -> say $
-      "River: " ++ unwords (map colorCard [a,b,c,t,r])
-
-showCurrentPlayer :: PokerM ()
-showCurrentPlayer = do
-  g <- runSTM askGame
-  let cp  = currentPlayer g
-      tc  = toCall g
-  say $
-    "Current player: " ++ playerNickname cp
-    ++ (if tc > 0 then " (" ++ show tc ++ " to call)" else "")
-
-
-showCurrentOrder :: PokerM ()
-showCurrentOrder = do
-  (order, fpos) <- runSTM $ (,) <$> askCurrentOrder <*> askFirstPosition
-
-  let formatNames p =
-         -- first player indication
-        (if p == fpos then "*" else "")
-         -- nick
-        ++ playerNickname p
-         -- (current pot/total wealth)
-        ++ " (" ++ show (playerPot p) ++ "/" ++ show (playerStack p) ++ ")"
-
-  say $ "Currently playing: " ++ intercalate ", " (map formatNames order)
-
-showHand :: PokerM ()
-showHand = do
-  p <- runSTM askPlayer
-  showHand' p
-
-showHand' :: Player -> PokerM ()
-showHand' p
-  | Just (Hand hand) <- playerHand p =
-    sendNoticeTo (playerNickname p) $ "Your hand: " ++ unwords (map colorCard hand)
-  | otherwise =
-    withNickAndUser $ \n u ->
-      logM 1 $ "No hand found: " ++ show p ++ " (" ++ n ++ " / " ++ u ++ ")"
-
-showCards :: Bool -> PokerM ()
-showCards showNoCards = do
-  g <- runSTM askGame
-  case communityCards g of
-    PreFlop -> when showNoCards $
-      answer "No cards have been played yet."
-    Flop (a,b,c) -> say $
-      "Flop: " ++ unwords (map colorCard [a,b,c])
-    Turn ((a,b,c),t) -> say $
-      "Turn: " ++ unwords (map colorCard [a,b,c,t])
-    River ((a,b,c),t,r) -> say $
-      "River: " ++ unwords (map colorCard [a,b,c,t,r])
-
 --------------------------------------------------------------------------------
 -- Play
 
@@ -490,73 +529,7 @@ fold' :: PokerM ()
 fold' = joinSTM $ do
   p <- askCurrentPlayer
   updateGame fold
+  updateBank $ deposit (playerUsername p) (playerStack p)
   return $ do
     say $ playerNickname p ++ " folds!"
     showStatus
-
-
---------------------------------------------------------------------------------
--- Organizing players & cards
-
-endGame :: PokerSTM (PokerM ())
-endGame = do
-  -- figure out player hand ranks
-  g <- askGame
-
-  -- TODO: handle side pots
-  let pot = totalPotSize g
-
-  forM_ (players g) $ \p -> updateBank $ deposit (playerUsername p) (playerStack p)
-  -- reset game
-  putGame $ newGame (rndGen g)
-
-  case players g of
-
-    -- last player wins the game
-    [p] -> do
-      updateBank $ deposit (playerUsername p) pot
-      return $ do
-        say $
-          playerNickname (head $ players g) ++ " wins the game. " ++
-          "Pot size: " ++ show (totalPotSize g)
-   
-    _ | River ((f1,f2,f3),t,r) <- communityCards g -> do
-
-        let -- flatten community cards
-            cc = [f1,f2,f3,t,r]
-            -- figure out best hand
-            ranks = map (\p -> (p, findBestHand . (cc ++) . hCards =<< playerHand p)) (players g)
-            -- get winner(s) and winning hand(s)
-            (winners:_) = groupOn snd $ sortOn (Down . snd) ranks
-
-        result <- case winners of
-
-          -- single winner takes it all
-          [(p,Just h)] | Just r <- rank h -> do
-            updateBank $ deposit (playerUsername p) pot
-            return $ say $ playerNickname p ++ " wins the pot of size " ++ show pot ++ " with: " ++ show r
-
-          -- multiple winners share the pot
-          ((p, Just h):_) | Just r <- rank h -> do
-            let n = length winners
-            forM_ winners $ \(p,_) -> do
-              updateBank $ deposit (playerUsername p) (pot `div` fromIntegral n)
-            return $ say $
-              "Split pot! The amount of " ++ show pot ++ " is split between: " ++
-              intercalate ", " (map (playerNickname . fst) winners) ++ ". " ++
-              "Winning hand: " ++ show r
-
-          -- catch errors
-          _ -> return $ do
-            logM 1 $ "No winner?! " ++ show g
-            throw WrongGameState
-
-        return $ do
-          say "Showdown! These are the players hands:"
-          forM_ (players g) $ \p@Player{ playerHand = Just h }->
-            say $ "  " ++ playerNickname p ++ ": " ++ unwords (map colorCard (hCards h)) ++ " (" ++ show (rank h) ++ ")"
-          result
-
-    _ -> return $ do
-      logM 1 $ "End game failed: " ++ show g
-      throw WrongGameState

@@ -183,6 +183,13 @@ askGameResult = maybe (lift retry) return =<< askMaybeGameResult
 putGameResult :: GameResult -> PokerSTM ()
 putGameResult = putGameState . Right
 
+resetGame :: PokerSTM ()
+resetGame = do
+  ps <- askPokerState
+  let (g1, g2) = split $ stdGen ps
+  putPokerState ps{ stdGen = g2 }
+  putGameState $ Left $ newGame g1
+  
 --------------------------------------------------------------------------------
 -- Players
 --

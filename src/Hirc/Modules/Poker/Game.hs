@@ -65,10 +65,8 @@ data Game = Game
   deriving (Eq, Show)
 
 data GameResult
-  = WinnerTakesItAll Rank [Player]
-  | ShowDown
-    { pots :: [(Money, [Player])]
-    }
+  = Showdown [(Player, Rank)] Money (Rank, [Player])
+  | LastManTakesItAll Player Money
   deriving (Show, Eq)
 
 data GameUpdate
@@ -229,11 +227,15 @@ payBlinds g
 mainPotHeight :: Game -> Money
 mainPotHeight g = maximum $ map playerPot (players g)
 
+mainPotSize :: Game -> Money
+mainPotSize g = 
+  let sumPlayerPots = sum (map playerPot (players g))
+   in sumPlayerPots + pot g
+
 totalPotSize :: Game -> Money
 totalPotSize g =
-  let sumPlayerPots = sum (map playerPot (players g))
-      sumSidePots   = sum (map snd (sidePots g))
-   in sumPlayerPots + sumSidePots + pot g
+  let sumSidePots = sum (map snd (sidePots g))
+   in sumSidePots + mainPotSize g
 
 toCall :: Game -> Money
 toCall g = mainPotHeight g - playerPot p
@@ -372,43 +374,16 @@ isNextPhase g = case (currentPosition g, lastRaise g) of
 --
 
 endGame :: Game -> GameResult
-endGame g = case winners of
-  ((p, Just h):_) | Just r <- rank h -> WinnerTakesItAll r (map fst winners)
+endGame g
+  | [p] <- players g
+  = LastManTakesItAll p{ playerPot = 0 } (mainPotSize g)
+  | otherwise
+  = Showdown ranked (mainPotSize g) (snd $ head winners, map fst winners)
  where
   River ((f1,f2,f3),t,r) = communityCards g
   cc = [f1,f2,f3,t,r]
-  ranks = map (\p -> (p, findBestHand . (cc ++) . hCards =<< playerHand p)) (players g)
-  (winners:_) = groupOn snd $ sortOn (Down . snd) ranks
-
-
---------------------------------------------------------------------------------
--- LEGACY UPDATES: TODO DELETE
---
-
-{-# DEPRECATED showFlop  "Use check/call/raise/fold/allIn instead" #-}
-{-# DEPRECATED showTurn  "Use check/call/raise/fold/allIn instead" #-}
-{-# DEPRECATED showRiver "Use check/call/raise/fold/allIn instead" #-}
-
-showFlop :: Game -> GameUpdate
-showFlop g
-  -- always "burn" the first card
-  | (_:a:b:c:dck) <- deck g
-  , PreFlop       <- communityCards g
-  = ok g { deck = dck, communityCards = Flop (a,b,c) }
-  | otherwise = failed WrongGameState
-
-showTurn :: Game -> GameUpdate
-showTurn g
-  -- always "burn" the first card
-  | (_:t:dck) <- deck g
-  , Flop fc   <- communityCards g
-  = ok g { deck = dck, communityCards = Turn (fc, t) }
-  | otherwise = failed WrongGameState
-
-showRiver :: Game -> GameUpdate
-showRiver g
-  -- always "burn" the first card
-  | (_:r:dck)   <- deck g
-  , Turn (fc,t) <- communityCards g
-  = ok g { deck = dck, communityCards = River (fc, t, r) }
-  | otherwise = failed WrongGameState
+  bestHand p =
+    let Just r = rank =<< findBestHand . (cc ++) . hCards  =<< playerHand p
+     in (p { playerPot = 0 },r)
+  ranked = sortOn (Down . snd) . map bestHand $ players g
+  winners:_ = groupOn snd ranked
