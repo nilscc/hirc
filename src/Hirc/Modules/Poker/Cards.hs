@@ -49,14 +49,14 @@ newtype Hand = Hand
 
 data Rank
     = HighCard [Value]
-    | Pair Value [Card]
-    | TwoPairs Value Value Card
+    | Pair Value [Value]
+    | TwoPairs Value Value Value
     | ThreeOfAKind Value
-    | Straight Card
+    | Straight Value
     | Flush Rank
     | FullHouse Value
     | FourOfAKind Value
-    | StraightFlush Card
+    | StraightFlush Value
   deriving (Eq, Ord, Show)
 
 instance Ord Hand where
@@ -82,7 +82,7 @@ rank h = let fs = [straightFlush, fourOfAKind, fullHouse, flush, straight, three
 straightFlush :: Hand -> Maybe Rank
 straightFlush (Hand cs) = do
   guard $ notNull cs && sameSuite cs && consValues cs
-  return $ StraightFlush (maximum cs)
+  return $ StraightFlush (cValue $ maximum cs)
 
 fourOfAKind :: Hand -> Maybe Rank
 fourOfAKind (Hand cs) = do
@@ -103,7 +103,7 @@ flush h@(Hand cs) = do
 straight :: Hand -> Maybe Rank
 straight (Hand cs) = do
   guard (notNull cs && consValues cs)
-  return $ Straight (maximum cs)
+  return $ Straight (cValue $ maximum cs)
 
 threeOfAKind :: Hand -> Maybe Rank
 threeOfAKind (Hand cs) = do
@@ -111,15 +111,20 @@ threeOfAKind (Hand cs) = do
     return $ ThreeOfAKind (cValue c)
 
 twoPairs :: Hand -> Maybe Rank
-twoPairs h = do
-    Pair v1 cs <- pair h
-    Pair v2 (c:_) <- pair $ Hand cs
-    return $ TwoPairs (max v1 v2) (min v1 v2) c
+twoPairs (Hand h) = do
+    (v1, cs) <- pair' h
+    (v2, c:_) <- pair' cs
+    return $ TwoPairs (max v1 v2) (min v1 v2) (cValue c)
 
 pair :: Hand -> Maybe Rank
-pair (Hand cs) = do
+pair (Hand h) = do
+  (v1, cs) <- pair' h
+  return $ Pair v1 (map cValue cs)
+
+pair' :: [Card] -> Maybe (Value, [Card])
+pair' cs = do
     cs'@(c:_) <- find ((==) 2 . length) $ sortAndGroup cs
-    return $ Pair (cValue c) (reverse $ sort $ filter (not . (`elem` cs')) cs)
+    return (cValue c, reverse $ sort $ filter (not . (`elem` cs')) cs)
 
 highCard :: Hand -> Maybe Rank
 highCard (Hand cs) = do
