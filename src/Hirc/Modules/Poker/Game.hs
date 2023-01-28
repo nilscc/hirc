@@ -364,10 +364,12 @@ incPhase g = case communityCards g of
   showRiver f t = g { deck = b:c:r, communityCards = River (f,t,a) } 
 
 isNextPhase :: Game -> Bool
-isNextPhase g = case (currentPosition g, lastRaise g) of
-  (0, Nothing) -> True
-  (p, Just ((l,u),_)) ->
-    p == l && playerUsername (currentPlayer g) == u
+isNextPhase g 
+  | PreFlop <- communityCards g = False
+  | otherwise = case (currentPosition g, lastRaise g) of
+    (0, Nothing) -> True
+    (p, Just ((l,u),_)) ->
+      p == l && playerUsername (currentPlayer g) == u
 
 --------------------------------------------------------------------------------
 -- End game

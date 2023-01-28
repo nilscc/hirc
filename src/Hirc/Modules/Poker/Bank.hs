@@ -18,6 +18,9 @@ data Bank = Bank
 emptyBank :: Bank
 emptyBank = Bank M.empty M.empty
 
+totalLoans :: UserName -> Bank -> Money
+totalLoans u b = maybe 0 (sum . map loanAmount) (M.lookup u $ bankLoans b)
+
 data Loan = Loan
   { loanAmount :: Money
   , loanUTC :: UTCTime

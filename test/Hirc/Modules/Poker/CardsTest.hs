@@ -24,8 +24,8 @@ pokerCardsSpec = do
             Just c4 = toCard "AS" -- Card Ace Spades
 
         it "maintains correct order" $ do
-            Pair Ace [c3,c2,c1] `shouldSatisfy` (< Pair Ace [c4,c3,c2])
-            Pair Ace [c3,c2,c1] `shouldSatisfy` (< TwoPairs King Jack c1)
+            Pair Ace [King, Jack, Number 2] `shouldSatisfy` (< Pair Ace [Ace, King, Jack])
+            Pair Ace [King, Jack, Number 2] `shouldSatisfy` (< TwoPairs King Jack (Number 2))
 
     describe "card ranks & findBestHand" $ do
 
@@ -47,10 +47,10 @@ pokerCardsSpec = do
 
         it "should calculate the right rank" $ do
             rank p1 `shouldBe` Just (HighCard [Ace, King, Queen, Jack, Number 5])
-            rank p2 `shouldBe` Just (TwoPairs Ace (Number 2) (Card Queen Diamonds))
-            rank p3 `shouldBe` Just (Straight (Card Ace Clubs))
+            rank p2 `shouldBe` Just (TwoPairs Ace (Number 2) Queen)
+            rank p3 `shouldBe` Just (Straight Ace)
             rank p4 `shouldBe` Just (Flush (HighCard [King, Number 6, Number 5, Number 3, Number 2]))
-            rank p5 `shouldBe` Just (Pair (Number 5) (toCards "KC 9S 8C"))
+            rank p5 `shouldBe` Just (Pair (Number 5) [King, Number 9, Number 8])
         
         it "should compare hands based on their ranks" $ do
             p1 `shouldSatisfy` (< p2)

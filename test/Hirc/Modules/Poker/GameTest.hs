@@ -7,12 +7,12 @@ import System.Random
 
 import Hirc
 import Hirc.Modules.Poker.Game
-import Control.Exception (throw)
+import Control.Exception (throw, assert)
 import Data.Either (fromRight, fromLeft, isRight, isLeft)
 import Hirc.Modules.Poker.Bank (Money)
 import System.Random (StdGen)
 import Data.Maybe (isJust)
-import Hirc.Modules.Poker.Game (Game(communityCards))
+import Hirc.Modules.Poker.Game (Game(communityCards), isNextPhase)
 
 newPlayer' n = newPlayer n n 10000
 
@@ -22,45 +22,55 @@ p2 = newPlayer' "p1"
 p3 = newPlayer' "p2"
 p4 = newPlayer' "p3"
 
--- Continue playing
-cont :: Show a => (Game a -> GameUpdate a) -> Game a -> Game a
-cont f g = fromLeft (error $ "Unexpected end of game: " ++ show (f g)) (f g)
+isOK :: GameUpdate -> Bool
+isOK GameUpdated{} = True
+isOK GameEnded{} = True
+isOK _ = False
 
-check' :: Show a => Game a -> Game a
+-- Continue playing
+cont :: (Game -> GameUpdate) -> Game -> Game
+cont f g = case f g of
+  GameUpdated g -> g
+  e -> error $ "Unexpected game update: " ++ show e
+
+check' :: Game -> Game
 check' = cont check
 
-call' :: Show a => Game a -> Game a
+call' :: Game -> Game
 call' = cont call
 
-fold' :: Show a => Game a -> Game a
+fold' :: Game -> Game
 fold' = cont fold
 
-raise' :: Show a => Money -> Game a -> Game a
+raise' :: Money -> Game -> Game
 raise' x = cont $ raise x
 
+join' :: Player -> Game -> Game
+join' p = cont (joinPlayer p)
+
+part' :: Player -> Game -> Game
+part' p = cont (partPlayer p)
+
 -- Default starting game
-g0, g1, g2, g3, g4 :: Game StdGen
+g0, g1, g2, g3, g4 :: Game
 
 -- new game
-g0 = joinPlayer p4
-   $ joinPlayer p3
-   $ joinPlayer p2
-   $ joinPlayer p1
+g0 = join' p4
+   . join' p3
+   . join' p2
+   . join' p1
    $ newGame (mkStdGen 42)
 
 -- game pre flop
-g1 = payBlinds $ dealCards g0
-
+g1 = cont payBlinds $ cont dealCards g0
 -- flop game
 g2 = check' $ call' $ call' $ call' g1
-
 -- turn game
 g3 = check' $ check' $ check' $ check' g2
-
 -- river game
 g4 = check' $ check' $ check' $ check' g3
 
-g5 :: GameUpdate StdGen
+g5 :: GameUpdate
 
 -- end game result
 g5 = check . check' . check' $ check' g4
@@ -68,45 +78,51 @@ g5 = check . check' . check' $ check' g4
 pokerGameSpec :: Spec
 pokerGameSpec = do
 
-  describe "test game setups" $ do
-    it "should have the right community cards" $ do
-      communityCards g0 `shouldBe` PreFlop
-      communityCards g1 `shouldBe` PreFlop
-      communityCards g2 `shouldSatisfy` \(Flop _) -> True
-      communityCards g3 `shouldSatisfy` \(Turn _) -> True
-      communityCards g4 `shouldSatisfy` \(River _) -> True
-      g5 `shouldSatisfy` isRight
-
-  describe "join and part" $ do
-
-    it "should reset player pots and hand" $ do
-      let p = (newPlayer' "p5") { playerPot = 1000 }
-          g = joinPlayer p g0
-          l = last $ players g
-      l `shouldNotBe` p
-      playerUsername l `shouldBe` playerUsername p
-      playerPot l `shouldBe` 0
-      playerHand l `shouldBe` Nothing
-
-    it "should remove the correct player only" $ do
-      players (partPlayer p2 g0) `shouldBe` [p1, p3, p4]
-
+  testSetupSpec
+  joinPartSpec
   checkSpec
   foldSpec
+  allInSpec
+
+testSetupSpec :: Spec
+testSetupSpec = describe "test setup" $ do
+  it "games should have the right community cards" $ do
+    communityCards g0 `shouldBe` PreFlop
+    communityCards g1 `shouldBe` PreFlop
+    communityCards g2 `shouldSatisfy` \(Flop _) -> True
+    communityCards g3 `shouldSatisfy` \(Turn _) -> True
+    communityCards g4 `shouldSatisfy` \(River _) -> True
+    g5 `shouldSatisfy` isOK
+
+joinPartSpec :: Spec
+joinPartSpec = describe "join and part" $ do
+
+  it "should reset player pots and hand" $ do
+    let p = (newPlayer' "p5") { playerPot = 1000 }
+        g = join' p g0
+        l = last $ players g
+    l `shouldNotBe` p
+    playerUsername l `shouldBe` playerUsername p
+    playerPot l `shouldBe` 0
+    playerHand l `shouldBe` Nothing
+
+  it "should remove the correct player only" $ do
+    players (part' p2 g0) `shouldBe` [p1, p3, p4]
 
 checkSpec :: Spec
-checkSpec = do
+checkSpec = describe "check" $ do
   return ()
 
 foldSpec :: Spec
 foldSpec = describe "fold" $ do
+
   it "should keep pot size constant" $ do
     totalPotSize (fold' g0) `shouldBe` totalPotSize g0
     totalPotSize (fold' g1) `shouldBe` totalPotSize g1
     totalPotSize (fold' g2) `shouldBe` totalPotSize g2
 
   it "should end the game if the last player folds" $ do
-    (fold . fold' . fold' $ g1) `shouldSatisfy` isRight
+    (fold . fold' . fold' $ g1) `shouldSatisfy` isOK
 
   it "should update last raise position correctly" $ do
 
@@ -151,3 +167,11 @@ foldSpec = describe "fold" $ do
     let g'5 = check' . check' . check' $ g'4
     currentPosition g'5 `shouldBe` 2
     communityCards g'5 `shouldSatisfy` \(River _) -> True
+
+allInSpec :: Spec
+allInSpec = describe "all in" $ do
+  -- start with flop game
+  let g = g2
+
+  --it ""
+  return ()

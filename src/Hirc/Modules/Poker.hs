@@ -31,7 +31,7 @@ import Hirc.Modules.Poker.Game hiding (endGame, incPosition)
 import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Module
 import Hirc.Modules.Poker.STM
-import Hirc.Modules.Poker.Bank (Loan(loanAmount, Loan, loanUTC), newLoan, withdraw, balance, Money, deposit)
+import Hirc.Modules.Poker.Bank (Loan(loanAmount, Loan, loanUTC), newLoan, withdraw, balance, Money, deposit, totalLoans)
 import Data.List.Extra (groupOn)
 import Data.Ord (Down(Down))
 import System.Random.Shuffle (shuffleM, shuffle')
@@ -144,7 +144,7 @@ runPokerCommands = do
     userCommand $ \"turn"           -> doneAfter showCurrentPlayer
     userCommand $ \"order"          -> doneAfter showCurrentOrder
     userCommand $ \"hand"           -> doneAfter showHand
-    userCommand $ \"cards"          -> doneAfter $ showCards True
+    userCommand $ \"cards"          -> doneAfter showCards
 
     userCommand $ \"check"          -> doneAfter $ do
       currentPlayerOnlyGuard
@@ -263,10 +263,10 @@ showStack = do
 showStatus :: PokerM ()
 showStatus = do
   s <- runSTM askGameState
+  logM 2 $ "showStatus: " ++ show s
   case s of
     Left g -> do
-      when (isNextPhase g) $ do
-        showCards False
+      when (isNextPhase g) showCards
       showCurrentPlayer
     Right lm@LastManTakesItAll{} -> do
       lastMan lm
@@ -355,12 +355,11 @@ showHand' p
     withNickAndUser $ \n u ->
       logM 1 $ "No hand found: " ++ show p ++ " (" ++ n ++ " / " ++ u ++ ")"
 
-showCards :: Bool -> PokerM ()
-showCards showNoCards = do
+showCards :: PokerM ()
+showCards = do
   g <- runSTM askGame
   case communityCards g of
-    PreFlop -> when showNoCards $
-      answer "No cards have been played yet."
+    PreFlop -> answer "No cards have been played yet."
     Flop (a,b,c) -> say $
       "Flop: " ++ unwords (map colorCard [a,b,c])
     Turn ((a,b,c),t) -> say $
@@ -376,7 +375,9 @@ bankBalance :: PokerM ()
 bankBalance = withUsername $ \u -> 
   joinSTM $ do
     b <- askBank
-    return $ answer $ "Your bank account balance is: " ++ show (balance u b)
+    let bal = balance u b
+        tot = totalLoans u b
+    return $ answer $ "Your bank account balance is: " ++ show bal ++ " (you owe in total: " ++ show tot ++ ")"
 
 bankLoan :: Money -> PokerM ()
 bankLoan amount = withUsername $ \u -> do
@@ -388,8 +389,10 @@ bankLoan amount = withUsername $ \u -> do
     if bal <= minimumBalanceForLoan then do
       let l = Loan { loanUTC = now, loanAmount = amount - bal }
       updateBank $ newLoan u l
+      b <- askBank
+      let t = totalLoans u b
       return $ answer $
-        "You loaned " ++ show (loanAmount l) ++ " from the bank."
+        "You loaned " ++ show (loanAmount l) ++ " from the bank for a total of " ++ show t ++ " in loans."
      else
       return $ answer $
         "You still have enough funds (more than " ++ show minimumBalanceForLoan ++ ")."
