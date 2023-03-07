@@ -1,11 +1,12 @@
 module Main where
 
-import Test.Hspec
-
-import Hirc.Modules.Poker.GameTest
-import Hirc.Modules.Poker.CardsTest
+import Hirc.Modules.Poker.AllInTests (pokerAllInSpec)
+import Hirc.Modules.Poker.CardsTest (pokerCardsSpec)
+import Hirc.Modules.Poker.GameTest (pokerGameSpec)
+import Test.Hspec (hspec)
 
 main :: IO ()
 main = hspec $ do
-    pokerGameSpec
-    pokerCardsSpec
+  pokerGameSpec
+  pokerCardsSpec
+  pokerAllInSpec

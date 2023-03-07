@@ -8,6 +8,7 @@ library:
     - mtl >= 2.3.1
     - transformers
     - containers
+    - array
     - directory
     - stm
     - safecopy

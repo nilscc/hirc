@@ -1,10 +1,9 @@
-module Hirc.Modules.Poker.GameTest (pokerGameSpec) where
+module Hirc.Modules.Poker.GameTest where
 
 import Control.Monad.IO.Class
 import Test.Hspec
 import Test.Hspec.Expectations
 import System.Random
-
 import Hirc
 import Hirc.Modules.Poker.Game
 import Control.Exception (throw, assert)
