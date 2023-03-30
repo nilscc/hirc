@@ -34,7 +34,7 @@ import Hirc.Modules.Poker.Game hiding (endGame, incPosition)
 import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Module
 import Hirc.Modules.Poker.STM
-import Hirc.Modules.Poker.Bank (Loan(loanAmount, Loan, loanUTC), newLoan, withdraw, balance, Money, deposit, totalLoans)
+import Hirc.Modules.Poker.Bank
 import Data.List.Extra (groupOn)
 import Data.Ord (Down(Down))
 import System.Random.Shuffle (shuffleM, shuffle')
@@ -77,7 +77,7 @@ runBankCommands = do
     b <- runSTM askBank
     logM 2 $ show b
 
-  userCommand $ \"bank" "balance"         -> doneAfter bankBalance
+  userCommand $ \"bank" "balance"         -> doneAfter bankBalance'
   userCommand $ \"bank" "help"            -> doneAfter bankHelp
 
   -- check if game is running currently
@@ -102,6 +102,9 @@ defaultLoan = 10000
 
 minimumBalanceForLoan :: Money
 minimumBalanceForLoan = 1000
+
+saveBank :: MonadIO m => Bank -> m ()
+saveBank b = liftIO $ saveToJson b "bank.json"
 
 runPokerCommands :: PokerM ()
 runPokerCommands = do
@@ -280,8 +283,10 @@ showStatus = do
  where
   lastMan (LastManTakesItAll p m) = do
     say $ playerNickname p ++ " wins the pot: " ++ show m
-    runSTM $ do
+    b <- runSTM $ do
       updateBank $ deposit (playerUsername p) (playerStack p + m)
+      askBank
+    saveBank b
 
   showdown (Showdown ps m (wr,ws)) = do
     say "Game ended. Showdown!"
@@ -296,11 +301,13 @@ showStatus = do
 
     -- return stack to all and pay out price to winning players
     let price = m `div` fromIntegral (length ws)
-    runSTM $ do
+    b <- runSTM $ do
       forM_ ps $ \(p,_) -> do
         updateBank $ deposit (playerUsername p) (playerStack p)
       forM_ ws $ \p -> do
         updateBank $ deposit (playerUsername p) price
+      askBank
+    saveBank b
 
     -- show final game message
     case ws of
@@ -374,8 +381,8 @@ showCards = do
 -- Bank commands
 --
 
-bankBalance :: PokerM ()
-bankBalance = withUsername $ \u -> 
+bankBalance' :: PokerM ()
+bankBalance' = withUsername $ \u -> 
   joinSTM $ do
     b <- askBank
     let bal = balance u b
@@ -392,10 +399,12 @@ bankLoan amount = withUsername $ \u -> do
     if bal <= minimumBalanceForLoan then do
       let l = Loan { loanUTC = now, loanAmount = amount - bal }
       updateBank $ newLoan u l
-      b <- askBank
-      let t = totalLoans u b
-      return $ answer $
-        "You loaned " ++ show (loanAmount l) ++ " from the bank for a total of " ++ show t ++ " in loans."
+      b' <- askBank
+      let t = totalLoans u b'
+      return $ do
+        saveBank b'
+        answer $
+          "You loaned " ++ show (loanAmount l) ++ " from the bank for a total of " ++ show t ++ " in loans."
      else
       return $ answer $
         "You still have enough funds (more than " ++ show minimumBalanceForLoan ++ ")."
@@ -443,8 +452,11 @@ playerQuit = handle playerNotFound . joinSTM $ do
   p <- askPlayer
   if isNothing (playerHand p) then do
     updateBank $ deposit (playerUsername p) (playerStack p)
+    b <- askBank
     updateGame $ partPlayer p
-    return $ say ("\"" ++ playerNickname p ++ "\" left the game.")
+    return $ do
+      saveBank b
+      say ("\"" ++ playerNickname p ++ "\" left the game.")
   else
     return $ answer "You have to fold first."
  where
@@ -538,6 +550,8 @@ fold' = joinSTM $ do
   p <- askCurrentPlayer
   updateGame fold
   updateBank $ deposit (playerUsername p) (playerStack p)
+  b <- askBank
   return $ do
+    saveBank b
     say $ playerNickname p ++ " folds!"
     showStatus

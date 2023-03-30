@@ -3,6 +3,8 @@
 module Hirc.Modules.Poker.Module where
 
 import qualified Data.Map as M
+import Data.Maybe (fromMaybe)
+import Control.Monad.Trans (liftIO)
 
 import Hirc
 import Hirc.Modules.Poker.Bank
@@ -24,9 +26,10 @@ type PokerM a = ModuleMessageM PokerModule a
 
 initPokerState :: HircM PokerState
 initPokerState = do
+  b <- liftIO $ loadFromJson "bank.json"
   sg <- getStdGen
   return PokerState
     { games = M.empty
-    , bank = emptyBank -- TODO: Load from persistent storage
+    , bank = fromMaybe emptyBank b
     , stdGen = sg
     }

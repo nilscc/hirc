@@ -1,11 +1,16 @@
+{-# LANGUAGE DeriveGeneric #-}
+
 module Hirc.Modules.Poker.Bank where
 
 import Data.Map (Map)
 import qualified Data.Map as M
-
-import Hirc
+import qualified Data.ByteString.Lazy as BS
+import GHC.Generics
+import Data.Aeson
 import Data.Time (UTCTime)
 import Data.Maybe (fromMaybe)
+
+import Hirc
 
 type Money = Integer
 
@@ -13,7 +18,12 @@ data Bank = Bank
   { bankBalance :: Map UserName Money
   , bankLoans :: Map UserName [Loan]
   }
-  deriving (Eq, Show)
+  deriving (Generic, Eq, Show)
+
+instance ToJSON Bank where
+  toEncoding = genericToEncoding defaultOptions
+
+instance FromJSON Bank
 
 emptyBank :: Bank
 emptyBank = Bank M.empty M.empty
@@ -25,7 +35,12 @@ data Loan = Loan
   { loanAmount :: Money
   , loanUTC :: UTCTime
   }
-  deriving (Eq, Show)
+  deriving (Generic, Eq, Show)
+
+instance ToJSON Loan where
+  toEncoding = genericToEncoding defaultOptions
+
+instance FromJSON Loan
 
 balance :: UserName -> Bank -> Money
 balance u = fromMaybe 0 . M.lookup u . bankBalance
@@ -51,3 +66,9 @@ newLoan user loan bank = bank
   f = Just . maybe [loan] (loan:)
   g = Just . maybe m (m +)
   m = loanAmount loan
+
+saveToJson :: Bank -> FilePath -> IO ()
+saveToJson b fp = BS.writeFile fp $ encode b
+
+loadFromJson :: FilePath -> IO (Maybe Bank)
+loadFromJson fp = decode <$> BS.readFile fp
