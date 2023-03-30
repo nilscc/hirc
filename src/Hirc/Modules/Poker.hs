@@ -5,8 +5,10 @@ module Hirc.Modules.Poker
   ( pokerModule
   ) where
 
+import Data.Array.ST
+import Data.STRef
 import Data.Time.Clock (UTCTime, getCurrentTime)
-import Control.Monad (mzero, join, forM_, unless, when, guard)
+import Control.Monad (mzero, join, forM_, unless, when, guard, liftM, forM)
 import Control.Monad.State
 import Control.Exception.Peel (throw, handle, Exception, SomeException (SomeException), catch)
 import qualified Control.Monad.Reader as R
@@ -16,6 +18,7 @@ import qualified Data.Map as M
 import qualified Data.List as L
 import Data.List hiding (delete)
 import System.Random
+import System.Random.Stateful
 import Control.Concurrent.STM (atomically, readTVar, writeTVar, modifyTVar, throwSTM, catchSTM)
 import qualified Control.Concurrent.STM as STM
 import GHC.Conc (TVar(TVar), STM (STM))
