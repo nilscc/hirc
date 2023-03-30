@@ -370,6 +370,7 @@ isNextPhase g
     (0, Nothing) -> True
     (p, Just ((l,u),_)) ->
       p == l && playerUsername (currentPlayer g) == u
+    _ -> False
 
 --------------------------------------------------------------------------------
 -- End game

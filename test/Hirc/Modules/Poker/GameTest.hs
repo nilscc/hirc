@@ -82,6 +82,22 @@ pokerGameSpec = do
   checkSpec
   foldSpec
   allInSpec
+  nextPhaseSpec
+
+nextPhaseSpec :: Spec
+nextPhaseSpec = describe "next phase" $ do
+  it "should give correct result in a game without raises" $ do
+    isNextPhase g0 `shouldBe` False
+    isNextPhase g1 `shouldBe` False -- preflop game
+    isNextPhase g2 `shouldBe` True -- flop game
+    isNextPhase (check' g2) `shouldBe` False
+    isNextPhase (check' $ check' g2) `shouldBe` False
+    isNextPhase g3 `shouldBe` True -- turn game
+    isNextPhase (check' g3) `shouldBe` False
+    isNextPhase (check' $ check' g3) `shouldBe` False
+    isNextPhase g4 `shouldBe` True -- river game
+    isNextPhase (check' g4) `shouldBe` False
+    isNextPhase (check' $ check' g4) `shouldBe` False
 
 testSetupSpec :: Spec
 testSetupSpec = describe "test setup" $ do
