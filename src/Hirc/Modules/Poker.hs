@@ -467,14 +467,14 @@ updatePlayerNicknames = withParams $ \[newNick] -> runSTM $ do
 dealCards' :: PokerM ()
 dealCards' = handlePokerExceptions $ do
 
-    -- update the main game
-    updateGame dealCards
-    updateGame payBlinds
-
     -- get information about small and big blind
     g <- askGame
     let (p1:p2:_) = players g
         (sb,bb)   = blinds g
+
+    -- update the main game
+    updateGame dealCards
+    updateGame payBlinds
 
     return $ do
       say $ "Starting a new round! The players are: " ++
