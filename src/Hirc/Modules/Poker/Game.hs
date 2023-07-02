@@ -18,11 +18,11 @@ import Data.Ord (Down(Down))
 -- Settings
 
 startingMoney :: Money
-startingMoney = 10000
+startingMoney = 1000
 
 bigBlind, smallBlind :: Money
-bigBlind   = 200
-smallBlind = 100
+bigBlind   = 20
+smallBlind = 10
 
 --------------------------------------------------------------------------------
 
