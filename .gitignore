@@ -16,3 +16,4 @@ commands.json
 LoginData.hs
 cookies
 bank.json
+*.backup
