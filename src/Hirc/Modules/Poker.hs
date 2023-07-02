@@ -104,10 +104,10 @@ runBankCommands = do
 -- userCommand $ \"bank" "deposit"         -> doneAfter $ bankDeposit Nothing
 
 defaultLoan :: Money
-defaultLoan = 10000
+defaultLoan = 1000
 
 minimumBalanceForLoan :: Money
-minimumBalanceForLoan = 1000
+minimumBalanceForLoan = 100
 
 saveBank :: MonadIO m => Bank -> m ()
 saveBank b = liftIO $ saveToJson b "bank.json"
