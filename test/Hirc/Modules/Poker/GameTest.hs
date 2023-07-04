@@ -26,6 +26,10 @@ isOK GameUpdated{} = True
 isOK GameEnded{} = True
 isOK _ = False
 
+isOngoing :: GameUpdate -> Bool
+isOngoing GameUpdated{} = True
+isOngoing _ = False
+
 -- Continue playing
 cont :: (Game -> GameUpdate) -> Game -> Game
 cont f g = case f g of
@@ -138,6 +142,25 @@ foldSpec = describe "fold" $ do
 
   it "should end the game if the last player folds" $ do
     (fold . fold' . fold' $ g1) `shouldSatisfy` isOK
+
+  it "should not end game when first player folds" $ do
+    let g = cont dealCards
+          . join' p3 . join' p2 . join' p1
+          $ newGame (mkStdGen 42)
+        p = players g
+        g' = cont payBlinds g
+        p' = players g'
+
+    currentPlayer g' `shouldBe` p !! 2
+    
+    isNextPhase g' `shouldBe` False
+
+    -- perform fold
+    let f = fold g'
+        f' = fold' g'
+    f `shouldSatisfy` isOngoing
+    communityCards f' `shouldBe` PreFlop
+
 
   it "should update last raise position correctly" $ do
 
