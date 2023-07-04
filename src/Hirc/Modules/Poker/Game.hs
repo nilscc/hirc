@@ -336,7 +336,8 @@ next g
   | n <= 1 = GameEnded $ endGame g
   | otherwise = case lastRaise g of
       Nothing
-        | 0 == currentPosition g -> incPhase g
+        | 0 == currentPosition g
+        , toCall g == 0 -> incPhase g
       Just ((lpos, lu), mon)
         | lpos == currentPosition g -> 
           if lu == cu then
