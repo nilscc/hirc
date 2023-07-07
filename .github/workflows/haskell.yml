@@ -21,15 +21,9 @@ jobs:
         enable-stack: true
         stack-setup-ghc: true
 
-    - name: Update
-      run: stack update
-    - name: Build
-      run: stack build
-    - name: Run tests
-      run: stack test
-      
     - uses: actions/cache@v3
       name: Cache ~/.stack
+      id: cache-stack
       with:
         path: ~/.stack
         key: ${{ runner.os }}-stack-global-${{ hashFiles('stack.yaml') }}-${{ hashFiles('package.yaml') }}
@@ -37,8 +31,22 @@ jobs:
           ${{ runner.os }}-stack-global-
     - uses: actions/cache@v3
       name: Cache .stack-work
+      id: cache-stack-work
       with:
         path: .stack-work
         key: ${{ runner.os }}-stack-work-${{ hashFiles('stack.yaml') }}-${{ hashFiles('package.yaml') }}-${{ hashFiles('**/*.hs') }}
         restore-keys: |
           ${{ runner.os }}-stack-work-
+          
+    - name: Install dependencies
+      if: steps.cache-stack.outputs.cache-hit != 'true' || steps.cache-stack-work.outputs.cache-hit != 'true'
+      run: |
+        stack update
+        stack build --dependencies-only
+      
+    - name: Build
+      run: stack build
+      
+    - name: Run tests
+      run: stack test
+      
