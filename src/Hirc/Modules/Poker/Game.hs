@@ -221,7 +221,7 @@ joinPlayer p g =
   ok
     g
       { players = players g ++ [u],
-        playerNicks = M.insert n u (playerNicks g),
+        playerNicks = M.insert u n (playerNicks g),
         playerStacks = M.insert u s (playerStacks g)
       }
   where
