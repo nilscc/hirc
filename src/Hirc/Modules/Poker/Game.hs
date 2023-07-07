@@ -385,6 +385,7 @@ fold g =
     g' =
       g
         { players = players',
+          playerHands = M.delete u (playerHands g),
           currentPosition = pos',
           mainPot = P.fold u (mainPot g),
           lastRaise = do
