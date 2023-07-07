@@ -1,9 +1,12 @@
-{-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE ImportQualifiedPost, NamedFieldPuns #-}
 
 module Hirc.Modules.Poker.Game where
 
 import Control.Exception
-import Data.Maybe (isJust, isNothing)
+import Control.Monad ((<=<))
+import Data.Maybe (isJust, isNothing, fromMaybe, fromJust)
+import Data.Map (Map)
+import Data.Map qualified as M
 import Data.List (find, filter, sortOn)
 import System.Random (StdGen, RandomGen, split)
 
@@ -18,6 +21,8 @@ import Control.Monad.IO.Class (MonadIO)
 import System.Random.Shuffle (shuffle')
 import Data.List.Extra (groupOn)
 import Data.Ord (Down(Down))
+import qualified Data.Text.Internal.Fusion.Size as M
+import Data.Function (on)
 
 --------------------------------------------------------------------------------
 -- Settings
@@ -45,14 +50,16 @@ data CommunityCards
   deriving (Eq, Show)
 
 data Game = Game
-  { players           :: [Player]
-  , currentPosition   :: Position
+  { players           :: [UserName]
+  , playerNicks       :: Map UserName NickName
+  , playerStacks      :: Map UserName Money
 
+  , playerHands       :: Map UserName Hand
+  , currentPosition   :: Position
   , lastRaise         :: Maybe ((Position, UserName), Money)
 
   , blinds            :: (Money, Money) -- small/big blind
-  , pot               :: Money -- community pot, contains all money from players who
-                               -- already left the game
+  , mainPot           :: Pot
   , sidePots          :: [Pot]
 
   , deck              :: [Card]
@@ -85,10 +92,13 @@ onOK _ gu = gu
 newGame :: StdGen -> Game
 newGame gen = Game
   { players = []
+  , playerNicks = M.empty
+  , playerStacks = M.empty
+  , playerHands = M.empty
   , currentPosition = 0
   , lastRaise = Nothing
   , blinds = (smallBlind, bigBlind)
-  , pot = 0
+  , mainPot = P.empty
   , sidePots = []
   , deck = shuffle' fullDeck (length fullDeck) g1
   , communityCards = PreFlop
@@ -105,7 +115,7 @@ newGame gen = Game
 isNewGame :: Game -> Bool
 isNewGame g =
   PreFlop == communityCards g &&
-  all (isNothing . playerHand) (players g) &&
+  M.null (playerHands g) &&
   totalPotSize g == 0 &&
   null (sidePots g) &&
   currentPosition g == 0
@@ -113,7 +123,7 @@ isNewGame g =
 isPreFlop :: Game -> Bool
 isPreFlop g
   | PreFlop <- communityCards g
-  = all (maybe False ((2 ==) . length . hCards) . playerHand) (players g) &&
+  = all ((2 ==) . length . hCards) (playerHands g) &&
     totalPotSize g >= sum (blinds g)
   | otherwise
   = False
@@ -121,21 +131,21 @@ isPreFlop g
 isFlop :: Game -> Bool
 isFlop g
   | Flop _ <- communityCards g
-  = all (maybe False ((2 ==) . length . hCards) . playerHand) (players g) &&
+  = all ((2 ==) . length . hCards) (playerHands g) &&
     totalPotSize g >= (snd (blinds g) * fromIntegral(length (players g)))
   | otherwise = False
 
 isTurn :: Game -> Bool
 isTurn g
   | Turn _ <- communityCards g
-  = all (maybe False ((2 ==) . length . hCards) . playerHand) (players g) &&
+  = all ((2 ==) . length . hCards) (playerHands g) &&
     totalPotSize g >= (snd (blinds g) * fromIntegral(length (players g)))
   | otherwise = False
 
 isRiver :: Game -> Bool
 isRiver g
   | River _ <- communityCards g
-  = all (maybe False ((2 ==) . length . hCards) . playerHand) (players g) &&
+  = all ((2 ==) . length . hCards) (playerHands g) &&
     totalPotSize g >= (snd (blinds g) * fromIntegral(length (players g)))
   | otherwise = False
 
@@ -147,17 +157,49 @@ isActiveGame g = isPreFlop g || isFlop g || isTurn g || isRiver g
 --
 
 findPlayer :: UserName -> Game -> Maybe Player
-findPlayer u g =
-  find ((u ==) . playerUsername) (players g)
+findPlayer u g = do
+  s <- M.lookup u (playerStacks g)
+  n <- M.lookup u (playerNicks g)
+  return Player
+    { playerUsername = u,
+      playerNickname = n,
+      playerHand = M.lookup u (playerHands g),
+      playerPot = fromMaybe 0 $ M.lookup u (potPlayers $ mainPot g),
+      playerStack = s
+    }
+
+currentUserName :: Game -> UserName
+currentUserName g = players g !! currentPosition g
 
 currentPlayer :: Game -> Player
-currentPlayer g = players g !! currentPosition g
+currentPlayer g =
+  let u = players g !! currentPosition g
+      ms = M.lookup u $ playerStacks g
+      pot = M.lookup u . potPlayers $ mainPot g
+      mh = M.lookup u $ playerHands g
+      n = fromJust $ M.lookup u $ playerNicks g
+   in Player
+        { playerUsername = u,
+          playerNickname = n,
+          playerStack = fromMaybe 0 ms,
+          playerHand = mh,
+          playerPot = fromMaybe 0 pot
+        }
+
+updatePlayer :: UserName -> (Player -> Player) -> Game -> Game
+updatePlayer u f g = 
+  let Just p = findPlayer u g
+      Player { playerStack, playerPot, playerHand } = f p
+   in g { playerHands = M.alter (const playerHand) u (playerHands g),
+          mainPot = P.set u playerPot (mainPot g),
+          playerStacks = M.insert u playerStack (playerStacks g)
+        }
 
 updateCurrentPlayer :: (Player -> Player) -> Game -> Game
-updateCurrentPlayer f g =
-  let (l, p:r) = splitAt (currentPosition g) (players g)
-   in g { players = l ++ f p : r }
+updateCurrentPlayer f g = updatePlayer (currentUserName g) f g
 
+playersByNickName :: Game -> [NickName]
+playersByNickName g = map (fromJust . (`M.lookup` playerNicks g)) (players g)
 
 --------------------------------------------------------------------------------
 -- Start of game
@@ -165,8 +207,8 @@ updateCurrentPlayer f g =
 
 newPlayer :: NickName -> UserName -> Money -> Player
 newPlayer nick user balance = Player
-  { playerNickname = nick
-  , playerUsername = user
+  { playerUsername = user
+  , playerNickname = nick
   , playerStack = balance
   , playerPot = 0
   , playerHand = Nothing
@@ -174,13 +216,23 @@ newPlayer nick user balance = Player
 
 joinPlayer :: Player -> Game -> GameUpdate
 joinPlayer p g = ok g
-  { players = players g ++ [ p { playerPot = 0, playerHand = Nothing }]
+  { players = players g ++ [ u ]
+  , playerNicks = M.insert n u (playerNicks g)
+  , playerStacks = M.insert u s (playerStacks g)
   }
+ where
+  u = playerUsername p
+  n = playerNickname p
+  s = playerStack p
 
 partPlayer :: Player -> Game -> GameUpdate
 partPlayer p g = ok g
-  { players = filter ((playerUsername p /=) . playerUsername) (players g)
+  { players = filter (u /=) (players g)
+  , playerNicks = M.delete u (playerNicks g)
+  , playerStacks = M.delete u (playerStacks g)
   }
+ where
+  u = playerUsername p
 
 dealCards :: Game -> GameUpdate
 dealCards g 
@@ -188,7 +240,9 @@ dealCards g
   | otherwise = ok g
     { deck = deck'
     -- shuffle order of players
-    , players = shuffle' players' n g1
+    , players = shuffle' (players g) n g1
+    -- store hands
+    , playerHands = M.fromList (zip (players g) hands)
     -- store new random gen
     , rndGen = g2
     }
@@ -203,18 +257,21 @@ dealCards g
   (c1,c2) = splitAt n cards
   -- the hands
   hands = zipWith (\a b -> Hand [a,b]) c1 c2
-  -- give each player their hand
-  players' = [ p { playerHand = Just h } | (p,h) <- zip (players g) hands ]
 
 payBlinds :: Game -> GameUpdate
 payBlinds g 
-  | (p1:p2:pls) <- players g
-  = ok $ g { players = pls ++ [bet p1 sb,bet p2 bb] }
+  | (u1:u2:pls) <- players g
+  = ok g
+      { players = pls ++ [u1, u2],
+        mainPot = P.put u2 bb $ P.put u1 sb $ mainPot g,
+        playerStacks =
+          M.adjust (subtract sb) u1 .
+          M.adjust (subtract bb) u2 $
+          playerStacks g
+      }
   | otherwise = failed NotEnoughPlayers
  where
   (sb, bb) = blinds g
-  bet p m = p { playerStack = playerStack p - m
-              , playerPot = playerPot p + m }
 
 
 --------------------------------------------------------------------------------
@@ -222,24 +279,21 @@ payBlinds g
 --
 
 mainPotHeight :: Game -> Money
-mainPotHeight g = maximum $ map playerPot (players g)
+mainPotHeight g = P.height (mainPot g)
 
 mainPotSize :: Game -> Money
-mainPotSize g = 
-  let sumPlayerPots = sum (map playerPot (players g))
-   in sumPlayerPots + pot g
+mainPotSize g = P.size (mainPot g)
+
+sidePotsSize :: Game -> Money
+sidePotsSize g = sum $ map P.size (sidePots g)
 
 totalPotSize :: Game -> Money
-totalPotSize g =
-  let sumSidePots = sum (map P.size (sidePots g))
-   in sumSidePots + mainPotSize g
+totalPotSize g = mainPotSize g + sidePotsSize g
 
 toCall :: Game -> Money
-toCall g = mainPotHeight g + sumSidePots - playerPot p
+toCall g = P.toCall u (mainPot g) + sum (map (P.toCall u) (sidePots g))
  where
-  p = currentPlayer g
-  sumSidePots = sum [  ]
-
+  u = currentUserName g
 
 bet :: Money -> Game -> GameUpdate
 bet m g
@@ -298,7 +352,7 @@ fold g =
     next g'
  where
   -- remove current player from players list
-  (xs,p:ys) = splitAt (currentPosition g) (players g)
+  (xs,u:ys) = splitAt (currentPosition g) (players g)
   players' = xs ++ ys
 
   -- keep current position, but potentially move it back to 0 if the last player
@@ -313,7 +367,7 @@ fold g =
   g' = g
     { players = players'
     , currentPosition = pos'
-    , pot = pot g + playerPot p
+    , mainPot = P.fold u (mainPot g)
     , lastRaise = do
         -- check if last raise was *before* current raise and subtract 1 from its position
         ((pos,usr),plr) <- lastRaise g
@@ -377,15 +431,14 @@ isNextPhase g
 
 endGame :: Game -> GameResult
 endGame g
-  | [p] <- players g
-  = LastManTakesItAll p{ playerPot = 0 } (mainPotSize g)
+  | [u] <- players g
+  = LastManTakesItAll (fromJust $ findPlayer u g) (mainPotSize g)
   | otherwise
-  = Showdown ranked (mainPotSize g) (snd $ head winners, map fst winners)
+  = Showdown rankedPlayers (mainPotSize g) (snd $ head winners, map fst winners)
  where
   River ((f1,f2,f3),t,r) = communityCards g
   cc = [f1,f2,f3,t,r]
-  bestHand p =
-    let Just r = rank =<< findBestHand . (cc ++) . hCards  =<< playerHand p
-     in (p { playerPot = 0 },r)
-  ranked = sortOn (Down . snd) . map bestHand $ players g
-  winners:_ = groupOn snd ranked
+  bestHands = M.map (fromJust . (rank <=< (findBestHand . (cc ++) . hCards))) (playerHands g)
+  ranked = sortOn (Down . snd) $ M.toList bestHands
+  rankedPlayers = map (\(u,r) -> (fromJust (findPlayer u g), r)) ranked
+  winners:_ = groupOn snd rankedPlayers

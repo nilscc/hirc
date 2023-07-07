@@ -5,8 +5,8 @@ import Hirc.Modules.Poker.Cards ( Hand )
 import Hirc (NickName, UserName)
 
 data Player = Player
-  { playerNickname :: NickName
-  , playerUsername :: UserName
+  { playerUsername :: UserName
+  , playerNickname :: NickName
   , playerStack :: Money
   , playerPot   :: Money
   , playerHand  :: Maybe Hand

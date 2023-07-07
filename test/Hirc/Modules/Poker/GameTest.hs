@@ -1,5 +1,8 @@
+{-# LANGUAGE ImportQualifiedPost #-}
+
 module Hirc.Modules.Poker.GameTest where
 
+import Data.Map qualified as M
 import Control.Monad.IO.Class
 import Test.Hspec
 import Test.Hspec.Expectations
@@ -7,6 +10,7 @@ import System.Random
 import Hirc
 import Hirc.Modules.Poker.Player
 import Hirc.Modules.Poker.Game
+import Hirc.Modules.Poker.Pot qualified as P
 import Control.Exception (throw, assert)
 import Data.Either (fromRight, fromLeft, isRight, isLeft)
 import Hirc.Modules.Poker.Bank (Money)
@@ -14,7 +18,7 @@ import System.Random (StdGen)
 import Data.Maybe (isJust)
 import Hirc.Modules.Poker.Game (Game(communityCards), isNextPhase)
 
-newPlayer' n = newPlayer n n 10000
+newPlayer' n = newPlayer n n 1000
 
 -- First 4 players
 p1 = newPlayer' "p0"
@@ -81,9 +85,10 @@ g5 = check . check' . check' $ check' g4
 
 pokerGameSpec :: Spec
 pokerGameSpec = do
-
-  testSetupSpec
   joinPartSpec
+  dealCardsSpec
+  payBlindsSpec
+  testSetupSpec
   checkSpec
   foldSpec
   allInSpec
@@ -118,16 +123,38 @@ joinPartSpec :: Spec
 joinPartSpec = describe "join and part" $ do
 
   it "should reset player pots and hand" $ do
-    let p = (newPlayer' "p5") { playerPot = 1000 }
+    let p = (newPlayer' "p5") { playerPot = 100 }
         g = join' p g0
-        l = last $ players g
+        u = last $ players g
+        Just l = findPlayer u g
     l `shouldNotBe` p
     playerUsername l `shouldBe` playerUsername p
+    playerNickname l `shouldBe` playerNickname p
     playerPot l `shouldBe` 0
     playerHand l `shouldBe` Nothing
+    playerStack l `shouldBe` 1000
 
   it "should remove the correct player only" $ do
-    players (part' p2 g0) `shouldBe` [p1, p3, p4]
+    players (part' p2 g0) `shouldBe` map playerUsername [p1, p3, p4]
+
+dealCardsSpec :: Spec
+dealCardsSpec = describe "Dealing cards" $ do
+  it "should be okay? idk :)" $ do
+    let gu = dealCards g0
+    gu `shouldSatisfy` isOK
+
+payBlindsSpec :: Spec
+payBlindsSpec = describe "Paying blinds" $ do
+  it "should result in the correct stacks and pots" $ do
+    let g = g1
+        p = mainPot g
+    P.height p `shouldBe` 20
+    P.size p `shouldBe` 30
+
+    let [u3,u4,u1,u2] = players g
+    P.potPlayers p `shouldBe` M.fromList [(u1,10), (u2,20)]
+
+    playerStacks g `shouldBe` M.fromList [(u1,990), (u2,980), (u3,1000), (u4,1000)]
 
 checkSpec :: Spec
 checkSpec = describe "check" $ do
@@ -152,7 +179,7 @@ foldSpec = describe "fold" $ do
         g' = cont payBlinds g
         p' = players g'
 
-    currentPlayer g' `shouldBe` p !! 2
+    currentUserName g' `shouldBe` p !! 2
     
     isNextPhase g' `shouldBe` False
 
@@ -166,7 +193,7 @@ foldSpec = describe "fold" $ do
   it "should update last raise position correctly" $ do
 
     -- setup raise on 3rd position
-    let g = raise' 500 . check' $ check' g2
+    let g = raise' 50 . check' $ check' g2
     currentPosition g `shouldBe` 3
     communityCards g `shouldSatisfy` \(Flop _) -> True
 
@@ -174,17 +201,17 @@ foldSpec = describe "fold" $ do
     let [p0,p1,p2,p3] = players g
 
     -- raise was done in 3rd position (counting from 0)
-    lastRaise g `shouldBe` Just ((2, playerUsername p2), 500)
+    lastRaise g `shouldBe` Just ((2, p2), 50)
 
     -- fold in last position
     let g'1 = fold' g
     currentPosition g'1 `shouldBe` 0
-    lastRaise g'1 `shouldBe` Just ((2, playerUsername p2), 500)
+    lastRaise g'1 `shouldBe` Just ((2, p2), 50)
 
     -- fold in first position
     let g'2 = fold' $ call' g
     currentPosition g'2 `shouldBe` 0
-    lastRaise g'2 `shouldBe` Just ((1, playerUsername p2), 500)
+    lastRaise g'2 `shouldBe` Just ((1, p2), 50)
 
     ---------------------------------------------------------
     -- perform fold in position of last raise (in next phase)
@@ -198,7 +225,7 @@ foldSpec = describe "fold" $ do
     -- perform the fold
     let g'4 = fold' g'3
     currentPosition g'4 `shouldBe` 2
-    lastRaise g'4 `shouldBe` Just ((2, playerUsername p3), 500)
+    lastRaise g'4 `shouldBe` Just ((2, p3), 50)
     -- it should not switch phase yet
     communityCards g'4 `shouldSatisfy` \(Turn _) -> True
 

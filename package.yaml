@@ -58,3 +58,4 @@ tests:
       - hspec
       - hspec-expectations
       - random
+      - containers

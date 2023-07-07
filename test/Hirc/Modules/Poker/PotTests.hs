@@ -23,6 +23,13 @@ pokerPotSpec = do
 
 potProperties :: Spec
 potProperties = describe "Pot properties" $ do
+  it "should have sane default values for empty pots" $ do
+    P.height P.empty `shouldBe` 0
+    P.size P.empty `shouldBe` 0
+    P.toCall "p1" P.empty `shouldBe` 0
+    P.toCall "p2" P.empty `shouldBe` 0
+    P.toCall "??" P.empty `shouldBe` 0
+
   let pot =
         buildPot
           [ ("p1", 100),
@@ -43,6 +50,11 @@ potProperties = describe "Pot properties" $ do
     P.fold "p2" pot `shouldSatisfy` (200 ==) . potCommunity
     P.fold "??" pot `shouldSatisfy` (0 ==) . potCommunity
 
+  it "should keep pot size constant on fold" $ do
+    P.size (P.fold "p1" pot) `shouldBe` P.size pot
+    P.size (P.fold "p2" pot) `shouldBe` P.size pot
+    P.size (P.fold "??" pot) `shouldBe` P.size pot
+
 potSplit :: Spec
 potSplit = describe "Split pot" $ do
   let p1 = ("p1", 100)
@@ -60,6 +72,6 @@ potSplit = describe "Split pot" $ do
   it "should update community pot correctly" $ do
     P.split "p3" pot {potCommunity = 50}
       `shouldBe` Just
-        ( buildPot [p1, p3],
-          (buildPot [p2]) {potCommunity = 50}
+        ( buildPot [p1, p2],
+          (buildPot [p3]) {potCommunity = 50}
         )

@@ -19,7 +19,11 @@ data Pot = Pot
 empty = Pot {potPlayers = M.empty, potCommunity = 0}
 
 height :: Pot -> Money
-height = maximum . potPlayers
+height p
+  | M.null ps = 0
+  | otherwise = maximum ps
+  where
+    ps = potPlayers p
 
 size :: Pot -> Money
 size p = sum (potPlayers p) + potCommunity p
@@ -27,6 +31,9 @@ size p = sum (potPlayers p) + potCommunity p
 toCall :: UserName -> Pot -> Money
 toCall u p =
   height p - fromMaybe 0 (M.lookup u (potPlayers p))
+
+set :: UserName -> Money -> Pot -> Pot
+set u m p = p {potPlayers = M.insert u m (potPlayers p)}
 
 put :: UserName -> Money -> Pot -> Pot
 put u m p =
@@ -41,7 +48,7 @@ fold u p =
       potCommunity = potCommunity p + fromMaybe 0 (M.lookup u (potPlayers p))
     }
 
--- | Split 
+-- | Split
 split :: UserName -> Pot -> Maybe (Pot, Pot)
 split u p
   | Just m <- M.lookup u (potPlayers p) =
