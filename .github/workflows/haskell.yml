@@ -20,17 +20,18 @@ jobs:
       with:
         enable-stack: true
         stack-setup-ghc: true
+        stack-version: '2.11.1'
 
-    - uses: actions/cache@v3
-      name: Cache ~/.stack
+    - name: Cache ~/.stack
+      uses: actions/cache@v3
       id: cache-stack
       with:
         path: ~/.stack
         key: ${{ runner.os }}-stack-global-${{ hashFiles('stack.yaml') }}-${{ hashFiles('package.yaml') }}
         restore-keys: |
           ${{ runner.os }}-stack-global-
-    - uses: actions/cache@v3
-      name: Cache .stack-work
+    - name: Cache .stack-work
+      uses: actions/cache@v3
       id: cache-stack-work
       with:
         path: .stack-work
