@@ -2,35 +2,40 @@
 
 module Hirc.Modules.Poker.STM where
 
-import Data.Map (Map)
-import qualified Data.Map as M
-import qualified Data.List as L
-import Data.Maybe (isJust, isNothing, catMaybes, mapMaybe, fromJust)
 import Control.Concurrent.STM
-    ( TVar, STM, catchSTM, readTVar, retry, throwSTM, modifyTVar, writeTVar, catchSTM )
-import qualified Control.Concurrent.STM as STM
+  ( STM,
+    TVar,
+    catchSTM,
+    modifyTVar,
+    readTVar,
+    retry,
+    throwSTM,
+    writeTVar,
+  )
+import Control.Concurrent.STM qualified as STM
 import Control.Monad (unless, when)
-import Control.Monad.Trans (lift, liftIO)
+import Control.Monad.Random (RandomGen (split))
 import Control.Monad.Reader (ReaderT, runReaderT)
-import qualified Control.Monad.Reader as R
-
+import Control.Monad.Reader qualified as R
+import Control.Monad.Trans (lift, liftIO)
+import Data.Either (fromLeft)
+import Data.List qualified as L
+import Data.Map (Map)
+import Data.Map qualified as M
+import Data.Maybe (catMaybes, fromJust, isJust, isNothing, mapMaybe)
 import Hirc
+import Hirc.Modules.Poker.Bank (Bank, Money)
+import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Game hiding (updatePlayer)
+import Hirc.Modules.Poker.Game qualified as G
 import Hirc.Modules.Poker.Module
 import Hirc.Modules.Poker.Player
-import Hirc.Modules.Poker.Exception
-import Hirc.Modules.Poker.Bank (Bank, Money)
-import Control.Monad.Random (RandomGen (split))
-import Data.Either (fromLeft)
-import qualified Hirc.Modules.Poker.Game as G
-
 
 --------------------------------------------------------------------------------
 -- Main type definition
 --
 
 type PokerSTM = ReaderT (TVar PokerState, NickName, UserName, Maybe ChannelName) STM
-
 
 --------------------------------------------------------------------------------
 -- Lifted STM operations
@@ -42,7 +47,6 @@ orElse a b = do
 
 checkP :: Bool -> PokerSTM ()
 checkP = lift . STM.check
-
 
 --------------------------------------------------------------------------------
 -- STM Exception handling
@@ -59,7 +63,6 @@ catchP m h = do
 handleP :: (PokerException -> PokerSTM a) -> PokerSTM a -> PokerSTM a
 handleP = flip catchP
 
-
 --------------------------------------------------------------------------------
 -- Bank
 --
@@ -68,13 +71,13 @@ askBank :: PokerSTM Bank
 askBank = bank <$> askPokerState
 
 updateBank :: (Bank -> Bank) -> PokerSTM ()
-updateBank f = updatePokerState $ \pokerState -> pokerState
-  { bank = f (bank pokerState)
-  }
+updateBank f = updatePokerState $ \pokerState ->
+  pokerState
+    { bank = f (bank pokerState)
+    }
 
 putBank :: Bank -> PokerSTM ()
-putBank b = updatePokerState $ \ps -> ps { bank = b }
-
+putBank b = updatePokerState $ \ps -> ps {bank = b}
 
 --------------------------------------------------------------------------------
 -- Poker state
@@ -82,17 +85,17 @@ putBank b = updatePokerState $ \ps -> ps { bank = b }
 
 askNick :: PokerSTM NickName
 askNick = do
-  (_,n,_,_) <- R.ask
+  (_, n, _, _) <- R.ask
   return n
 
 askUser :: PokerSTM UserName
 askUser = do
-  (_,_,u,_) <- R.ask
+  (_, _, u, _) <- R.ask
   return u
 
 askChan :: PokerSTM (Maybe ChannelName)
 askChan = do
-  (_,_,_,mc) <- R.ask
+  (_, _, _, mc) <- R.ask
   return mc
 
 requireChan :: PokerSTM ChannelName
@@ -102,24 +105,22 @@ requireChan = do
 
 askPokerState :: PokerSTM PokerState
 askPokerState = do
-  (tvar,_,_,_) <- R.ask
+  (tvar, _, _, _) <- R.ask
   lift $ readTVar tvar
 
 putPokerState :: PokerState -> PokerSTM ()
 putPokerState ps = do
-  (tvar,_,_,_) <- R.ask
+  (tvar, _, _, _) <- R.ask
   lift $ writeTVar tvar ps
 
 updatePokerState :: (PokerState -> PokerState) -> PokerSTM ()
 updatePokerState f = do
-  (tvar,_,_,_) <- R.ask
+  (tvar, _, _, _) <- R.ask
   lift $ modifyTVar tvar f
-
 
 --------------------------------------------------------------------------------
 -- Game state
 --
-
 
 askGameState :: PokerSTM GameState
 askGameState = do
@@ -128,20 +129,22 @@ askGameState = do
   case M.lookup ch (games ps) of
     Just s -> return s
     Nothing -> do
-      let (g1,g2) = split $ stdGen ps
+      let (g1, g2) = split $ stdGen ps
           s = Left $ newGame g1
-      putPokerState ps
-        { games = M.insert ch s (games ps)
-        , stdGen = g2
-        }
+      putPokerState
+        ps
+          { games = M.insert ch s (games ps),
+            stdGen = g2
+          }
       return s
 
 putGameState :: GameState -> PokerSTM ()
 putGameState s = do
   chan <- requireChan
-  updatePokerState $ \ps -> ps
-    { games = M.insert chan s (games ps) }
-
+  updatePokerState $ \ps ->
+    ps
+      { games = M.insert chan s (games ps)
+      }
 
 askMaybeGameState :: PokerSTM (Maybe GameState)
 askMaybeGameState = do
@@ -154,14 +157,14 @@ askMaybeGame = do
   ms <- askMaybeGameState
   return $ case ms of
     Just (Left g) -> Just g
-    _             -> Nothing
+    _ -> Nothing
 
 askMaybeGameResult :: PokerSTM (Maybe GameResult)
 askMaybeGameResult = do
   ms <- askMaybeGameState
   return $ case ms of
     Just (Right r) -> Just r
-    _              -> Nothing
+    _ -> Nothing
 
 askGame :: PokerSTM Game
 askGame = maybe (lift retry) return =<< askMaybeGame
@@ -175,8 +178,8 @@ updateGame :: (Game -> GameUpdate) -> PokerSTM ()
 updateGame f = do
   s <- askGameState
   case either f GameEnded s of
-    GameUpdated g'     -> putGame g'
-    GameEnded res      -> putGameState $ Right res
+    GameUpdated g' -> putGame g'
+    GameEnded res -> putGameState $ Right res
     GameUpdateFailed e -> lift $ throwSTM e
 
 askGameResult :: PokerSTM GameResult
@@ -189,9 +192,9 @@ resetGame :: PokerSTM ()
 resetGame = do
   ps <- askPokerState
   let (g1, g2) = split $ stdGen ps
-  putPokerState ps{ stdGen = g2 }
+  putPokerState ps {stdGen = g2}
   putGameState $ Left $ newGame g1
-  
+
 --------------------------------------------------------------------------------
 -- Players
 --
@@ -243,10 +246,10 @@ askToCall pl = do
 
 askCurrentOrder :: PokerSTM [Player]
 askCurrentOrder = toOrder <$> askGame
- where
-  toOrder g@Game{ currentPosition, players } =
-    let (a,b) = L.splitAt currentPosition players
-     in mapMaybe (`G.findPlayer` g) (b ++ a)
+  where
+    toOrder g@Game {currentPosition, players} =
+      let (a, b) = L.splitAt currentPosition players
+       in mapMaybe (`G.findPlayer` g) (b ++ a)
 
 askFirstPosition :: PokerSTM Player
 askFirstPosition = (\g -> fromJust . (`G.findPlayer` g) . (!! 0) $ players g) <$> askGame
