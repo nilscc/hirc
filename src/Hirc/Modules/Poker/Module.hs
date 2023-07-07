@@ -1,22 +1,19 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Hirc.Modules.Poker.Module where
 
-import qualified Data.Map as M
-import Data.Maybe (fromMaybe)
+import Control.Monad.Random (StdGen, getStdGen)
 import Control.Monad.Trans (liftIO)
-
+import Data.Map qualified as M
+import Data.Maybe (fromMaybe)
 import Hirc
 import Hirc.Modules.Poker.Bank
 import Hirc.Modules.Poker.Game
-import Control.Monad.Random (StdGen, getStdGen)
 
 type GameState = Either Game GameResult
 
 data PokerState = PokerState
-  { games :: M.Map ChannelName GameState
-  , bank :: Bank
-  , stdGen :: StdGen
+  { games :: M.Map ChannelName GameState,
+    bank :: Bank,
+    stdGen :: StdGen
   }
   deriving (Show)
 
@@ -28,8 +25,9 @@ initPokerState :: HircM PokerState
 initPokerState = do
   b <- liftIO $ loadFromJson "bank.json"
   sg <- getStdGen
-  return PokerState
-    { games = M.empty
-    , bank = fromMaybe emptyBank b
-    , stdGen = sg
-    }
+  return
+    PokerState
+      { games = M.empty,
+        bank = fromMaybe emptyBank b,
+        stdGen = sg
+      }

@@ -14,21 +14,21 @@ module Hirc.Modules.Poker
 where
 
 import Control.Concurrent.STM (atomically, catchSTM, modifyTVar, readTVar, throwSTM, writeTVar)
-import qualified Control.Concurrent.STM as STM
+import Control.Concurrent.STM qualified as STM
 import Control.Exception.Peel (Exception, SomeException (SomeException), catch, handle, throw)
 import Control.Monad (forM, forM_, guard, join, liftM, mzero, unless, when)
 import Control.Monad.Error.Class (MonadError (throwError))
 import Control.Monad.Except (Except, ExceptT, runExceptT)
-import qualified Control.Monad.Reader as R
+import Control.Monad.Reader qualified as R
 import Control.Monad.State
 import Data.Acid.TemplateHaskell (tyVarBndrName)
 import Data.Array.ST
 import Data.Data (DataRep (FloatRep))
 import Data.List hiding (delete)
-import qualified Data.List as L
+import Data.List qualified as L
 import Data.List.Extra (groupOn)
 import Data.Map (Map)
-import qualified Data.Map as M
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Ord (Down (Down))
 import Data.STRef
@@ -38,10 +38,10 @@ import GHC.Num.BigNat (raiseDivZero_BigNat)
 import Hirc
 import Hirc.Modules.Poker.Bank
 import Hirc.Modules.Poker.Cards
-import Hirc.Modules.Poker.Player
 import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Game hiding (endGame, incPosition)
 import Hirc.Modules.Poker.Module
+import Hirc.Modules.Poker.Player
 import Hirc.Modules.Poker.STM
 import System.Random
 import System.Random.Shuffle (shuffle', shuffleM)
@@ -517,9 +517,11 @@ playerQuit = handle playerNotFound . joinSTM $ do
 updatePlayerNicknames :: PokerM ()
 updatePlayerNicknames = withParams $ \[newNick] -> runSTM $ do
   u <- askUser
-  let updateNick (Left g) = Left g
-        { playerNicks = M.adjust (const newNick) u (playerNicks g)
-        }
+  let updateNick (Left g) =
+        Left
+          g
+            { playerNicks = M.adjust (const newNick) u (playerNicks g)
+            }
       updateNick o = o -- TODO: update game result nicks?
 
   -- change all players in all games
