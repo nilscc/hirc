@@ -18,7 +18,8 @@ jobs:
     - uses: actions/checkout@v3
     - uses: actions/setup-haskell@v1
       with:
-        enabe-stack: true
+        enable-stack: true
+        stack-setup-ghc: true
 
     - name: Update
       run: stack update
