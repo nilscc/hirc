@@ -221,7 +221,7 @@ joinPlayer p g =
   ok
     g
       { players = players g ++ [u],
-        playerNicks = M.insert n u (playerNicks g),
+        playerNicks = M.insert u n (playerNicks g),
         playerStacks = M.insert u s (playerStacks g)
       }
   where
@@ -385,6 +385,7 @@ fold g =
     g' =
       g
         { players = players',
+          playerHands = M.delete u (playerHands g),
           currentPosition = pos',
           mainPot = P.fold u (mainPot g),
           lastRaise = do
