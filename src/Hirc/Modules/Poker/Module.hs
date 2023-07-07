@@ -1,3 +1,5 @@
+{-# LANGUAGE ImportQualifiedPost #-}
+
 module Hirc.Modules.Poker.Module where
 
 import Control.Monad.Random (StdGen, getStdGen)

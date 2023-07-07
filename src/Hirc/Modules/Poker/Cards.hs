@@ -1,3 +1,5 @@
+{-# LANGUAGE ImportQualifiedPost #-}
+
 module Hirc.Modules.Poker.Cards
   ( -- * Ranking API
     rank,
