@@ -40,11 +40,6 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-stack-work-
       
-    - name: Build
-      run: |
-        stack update
-        stack build
-      
     - name: Run tests
       run: stack test
       
