@@ -5,7 +5,7 @@ module Hirc.Modules.Poker.STM where
 import Data.Map (Map)
 import qualified Data.Map as M
 import qualified Data.List as L
-import Data.Maybe (isJust, isNothing)
+import Data.Maybe (isJust, isNothing, catMaybes, mapMaybe, fromJust)
 import Control.Concurrent.STM
     ( TVar, STM, catchSTM, readTVar, retry, throwSTM, modifyTVar, writeTVar, catchSTM )
 import qualified Control.Concurrent.STM as STM
@@ -15,12 +15,14 @@ import Control.Monad.Reader (ReaderT, runReaderT)
 import qualified Control.Monad.Reader as R
 
 import Hirc
-import Hirc.Modules.Poker.Game
+import Hirc.Modules.Poker.Game hiding (updatePlayer)
 import Hirc.Modules.Poker.Module
+import Hirc.Modules.Poker.Player
 import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Bank (Bank, Money)
 import Control.Monad.Random (RandomGen (split))
 import Data.Either (fromLeft)
+import qualified Hirc.Modules.Poker.Game as G
 
 
 --------------------------------------------------------------------------------
@@ -205,9 +207,7 @@ updatePlayer u f = do
   g <- askGame
   unless (isJust $ findPlayer u g) $
     lift retry
-  putGame g
-    { players = map (\p -> if playerUsername p == u then f p else p) (players g)
-    }
+  putGame $ G.updatePlayer u f g
 
 putPlayer :: Player -> PokerSTM ()
 putPlayer p = updatePlayer (playerUsername p) (const p)
@@ -216,15 +216,13 @@ userInGame :: PokerSTM Bool
 userInGame = (True <$ askPlayer) `orElse` return False
 
 askPlayers :: PokerSTM [Player]
-askPlayers = players <$> askGame
+askPlayers = (\g -> mapMaybe (`G.findPlayer` g) $ players g) <$> askGame
 
 askCurrentPosition :: PokerSTM Position
 askCurrentPosition = currentPosition <$> askGame
 
 askCurrentPlayer :: PokerSTM Player
-askCurrentPlayer = do
-  g <- askGame
-  return $ players g !! currentPosition g
+askCurrentPlayer = G.currentPlayer <$> askGame
 
 isCurrentPlayer :: PokerSTM Bool
 isCurrentPlayer = do
@@ -246,9 +244,9 @@ askToCall pl = do
 askCurrentOrder :: PokerSTM [Player]
 askCurrentOrder = toOrder <$> askGame
  where
-  toOrder Game{ currentPosition, players } =
+  toOrder g@Game{ currentPosition, players } =
     let (a,b) = L.splitAt currentPosition players
-     in b ++ a
+     in mapMaybe (`G.findPlayer` g) (b ++ a)
 
 askFirstPosition :: PokerSTM Player
-askFirstPosition = (!! 0) . players <$> askGame
+askFirstPosition = (\g -> fromJust . (`G.findPlayer` g) . (!! 0) $ players g) <$> askGame

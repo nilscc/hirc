@@ -38,6 +38,7 @@ import GHC.Num.BigNat (raiseDivZero_BigNat)
 import Hirc
 import Hirc.Modules.Poker.Bank
 import Hirc.Modules.Poker.Cards
+import Hirc.Modules.Poker.Player
 import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Game hiding (endGame, incPosition)
 import Hirc.Modules.Poker.Module
@@ -516,10 +517,9 @@ playerQuit = handle playerNotFound . joinSTM $ do
 updatePlayerNicknames :: PokerM ()
 updatePlayerNicknames = withParams $ \[newNick] -> runSTM $ do
   u <- askUser
-  let changeNick p
-        | u == playerUsername p = p {playerNickname = newNick}
-        | otherwise = p
-      updateNick (Left g) = Left g {players = map changeNick (players g)}
+  let updateNick (Left g) = Left g
+        { playerNicks = M.adjust (const newNick) u (playerNicks g)
+        }
       updateNick o = o -- TODO: update game result nicks?
 
   -- change all players in all games
@@ -536,7 +536,7 @@ dealCards' = handlePokerExceptions $ do
 
   -- get information about small and big blind
   g <- askGame
-  let (p1 : p2 : _) = players g
+  let (n1 : n2 : _) = playersByNickName g
       (sb, bb) = blinds g
 
   -- pay blinds
@@ -545,18 +545,18 @@ dealCards' = handlePokerExceptions $ do
   return $ do
     say $
       "Starting a new round! The players are: "
-        ++ intercalate ", " (map playerNickname (players g))
+        ++ intercalate ", " (M.elems (playerNicks g))
     say "Dealing hands…"
     notifyHands
-    say $ playerNickname p1 ++ " pays " ++ show sb ++ " (small blind)."
-    say $ playerNickname p2 ++ " pays " ++ show bb ++ " (big blind)."
+    say $ n1 ++ " pays " ++ show sb ++ " (small blind)."
+    say $ n2 ++ " pays " ++ show bb ++ " (big blind)."
     showCurrentPlayer
 
 -- Send NOTICE to all players with their hands
 notifyHands :: PokerM ()
 notifyHands = do
   g <- runSTM askGame
-  forM_ (players g) showHand'
+  forM_ (players g) $ showHand' . fromJust . (`findPlayer` g)
 
 playerInGameGuard :: PokerM ()
 playerInGameGuard = do
