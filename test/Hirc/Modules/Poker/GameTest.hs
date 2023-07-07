@@ -5,6 +5,7 @@ import Test.Hspec
 import Test.Hspec.Expectations
 import System.Random
 import Hirc
+import Hirc.Modules.Poker.Player
 import Hirc.Modules.Poker.Game
 import Control.Exception (throw, assert)
 import Data.Either (fromRight, fromLeft, isRight, isLeft)

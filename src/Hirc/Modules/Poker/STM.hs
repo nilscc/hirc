@@ -17,6 +17,7 @@ import qualified Control.Monad.Reader as R
 import Hirc
 import Hirc.Modules.Poker.Game
 import Hirc.Modules.Poker.Module
+import Hirc.Modules.Poker.Player
 import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Bank (Bank, Money)
 import Control.Monad.Random (RandomGen (split))

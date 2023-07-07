@@ -38,6 +38,7 @@ import GHC.Num.BigNat (raiseDivZero_BigNat)
 import Hirc
 import Hirc.Modules.Poker.Bank
 import Hirc.Modules.Poker.Cards
+import Hirc.Modules.Poker.Player
 import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Game hiding (endGame, incPosition)
 import Hirc.Modules.Poker.Module

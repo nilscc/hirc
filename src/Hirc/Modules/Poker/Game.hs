@@ -1,3 +1,5 @@
+{-# LANGUAGE ImportQualifiedPost #-}
+
 module Hirc.Modules.Poker.Game where
 
 import Control.Exception
@@ -8,6 +10,9 @@ import System.Random (StdGen, RandomGen, split)
 import Hirc
 import Hirc.Modules.Poker.Exception
 import Hirc.Modules.Poker.Cards
+import Hirc.Modules.Poker.Pot (Pot (..))
+import Hirc.Modules.Poker.Pot qualified as P
+import Hirc.Modules.Poker.Player (Player(..))
 import Hirc.Modules.Poker.Bank (Money)
 import Control.Monad.IO.Class (MonadIO)
 import System.Random.Shuffle (shuffle')
@@ -25,15 +30,6 @@ bigBlind   = 20
 smallBlind = 10
 
 --------------------------------------------------------------------------------
-
-data Player = Player
-  { playerNickname :: NickName
-  , playerUsername :: UserName
-  , playerStack :: Money
-  , playerPot   :: Money
-  , playerHand  :: Maybe Hand
-  }
-  deriving (Eq, Show)
 
 type Position = Int
 
@@ -55,8 +51,9 @@ data Game = Game
   , lastRaise         :: Maybe ((Position, UserName), Money)
 
   , blinds            :: (Money, Money) -- small/big blind
-  , pot               :: Money
-  , sidePots          :: [([UserName], Money)]
+  , pot               :: Money -- community pot, contains all money from players who
+                               -- already left the game
+  , sidePots          :: [Pot]
 
   , deck              :: [Card]
   , communityCards    :: CommunityCards
@@ -234,13 +231,14 @@ mainPotSize g =
 
 totalPotSize :: Game -> Money
 totalPotSize g =
-  let sumSidePots = sum (map snd (sidePots g))
+  let sumSidePots = sum (map P.size (sidePots g))
    in sumSidePots + mainPotSize g
 
 toCall :: Game -> Money
-toCall g = mainPotHeight g - playerPot p
+toCall g = mainPotHeight g + sumSidePots - playerPot p
  where
   p = currentPlayer g
+  sumSidePots = sum [  ]
 
 
 bet :: Money -> Game -> GameUpdate
