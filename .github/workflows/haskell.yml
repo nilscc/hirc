@@ -19,7 +19,6 @@ jobs:
     - uses: actions/setup-haskell@v1
       with:
         enabe-stack: true
-        stack-setup-ghc: true
 
     - name: Update
       run: stack update
