@@ -30,6 +30,7 @@ jobs:
         key: ${{ runner.os }}-stack-global-${{ hashFiles('stack.yaml') }}-${{ hashFiles('package.yaml') }}
         restore-keys: |
           ${{ runner.os }}-stack-global-
+          
     - name: Cache .stack-work
       uses: actions/cache@v3
       id: cache-stack-work
@@ -38,15 +39,11 @@ jobs:
         key: ${{ runner.os }}-stack-work-${{ hashFiles('stack.yaml') }}-${{ hashFiles('package.yaml') }}-${{ hashFiles('**/*.hs') }}
         restore-keys: |
           ${{ runner.os }}-stack-work-
-          
-    - name: Install dependencies
-      if: steps.cache-stack.outputs.cache-hit != 'true' || steps.cache-stack-work.outputs.cache-hit != 'true'
-      run: |
-        stack update
-        stack build --dependencies-only
       
     - name: Build
-      run: stack build
+      run: |
+        stack update
+        stack build
       
     - name: Run tests
       run: stack test
