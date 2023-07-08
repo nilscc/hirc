@@ -230,8 +230,6 @@ handlePokerExceptions stm = joinSTM $ handleP (return . hndl) stm
           ++ " (you have: "
           ++ show have
           ++ ")"
-    hndl CheckInstead =
-      answer "You need to \"check\" instead, there is nothing to call."
     hndl (CallFirst tc) = do
       answer $ "You have to call first: " ++ show tc
     hndl (RaiseTooSmall minimumRaise) = do

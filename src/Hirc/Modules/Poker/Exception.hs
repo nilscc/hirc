@@ -16,7 +16,6 @@ data PokerException
   | InsufficientFunds {need :: Money, have :: Money}
   | RaiseTooSmall Money
   | NotEnoughPlayers
-  | CheckInstead
   | CallFirst Money
   | WrongGameState
   deriving (Show, Exception, Eq)
