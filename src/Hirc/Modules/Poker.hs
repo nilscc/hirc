@@ -135,9 +135,9 @@ runPokerCommands = do
   -- while in game
   when (maybe False isActiveGame mg) $ do
     userCommand $ \case
-      "pot" -> doneAfter showPot
       "cards" -> doneAfter showCards
       text
+        | text `elem` ["pot", "p"] -> doneAfter showPot
         | text `elem` ["stack", "s"] -> doneAfter showStack
         | text `elem` ["turn", "t"] -> doneAfter showCurrentPlayer
         | text `elem` ["order", "o"] -> doneAfter showCurrentOrder
@@ -163,21 +163,24 @@ runPokerCommands = do
 -- Help
 showHelp :: PokerM ()
 showHelp = do
-  whisper "Playing Texas Hold'em, available commands are:"
+  whisper "Playing Texas Hold'em, available commands are (alias in parentheses):"
   whisper "    poker help                --   show this help"
-  whisper "    poker join                --   join a new game"
-  whisper "    poker leave               --   leave the current game"
+  whisper "    poker join (pj)           --   join a new game"
+  whisper "    poker leave (pl)          --   leave the current game"
   whisper "    players                   --   show who is playing in the next game"
-  whisper "    deal                      --   deal cards, start a new game"
+  whisper "    deal (d)                  --   deal cards, start a new game"
   whisper "While playing:"
-  whisper "    check/call/fold           --   check, call the current bet or fold your cards"
-  whisper "    raise <num>               --   bet a new sum (at least big blind or the amount of the last raise)"
-  -- whisper "    all in                    --   go all in"
-  whisper "    pot                       --   show current pot"
-  whisper "    stack                     --   show your current stack"
-  whisper "    hand                      --   show your hand"
-  whisper "    turn                      --   show whose turn it currently is"
-  whisper "    order                     --   show current order"
+  whisper "    check (ch)                --   check only"
+  whisper "    call (ca, c)              --   call current pot. will automatically check if amount to call is 0"
+  whisper "    fold (f)                  --   check, call the current bet or fold your cards"
+  whisper "    raise <num> (r <num>)     --   bet a new sum (at least big blind or the amount of the last raise)"
+  whisper "    all in                    --   go all in with your whole stack"
+  whisper "    pot (p)                   --   show current pot"
+  whisper "    stack (s)                 --   show your current stack"
+  whisper "    hand (h)                  --   show your hand"
+  whisper "    cards                     --   show community cards"
+  whisper "    turn (t)                  --   show whose turn it currently is"
+  whisper "    order (o)                 --   show current order"
 
 --------------------------------------------------------------------------------
 -- Helper
@@ -557,7 +560,10 @@ currentPlayerOnlyGuard = do
     done
 
 check' :: PokerM ()
-check' = handlePokerExceptions $ do
+check' = handlePokerExceptions check''
+
+check'' :: PokerSTM (PokerM ())
+check'' = do
   pl <- askCurrentPlayer
   updateGame check
   return $ do
@@ -569,16 +575,15 @@ call' = handlePokerExceptions $ do
   pl <- askCurrentPlayer
   tc <- askToCall pl
   if tc == 0
-    then do
-      updateGame check
-      return $ do
-        say $ playerNickname pl ++ " checks."
-        showStatus
-    else do
-      updateGame call
-      return $ do
-        say $ playerNickname pl ++ " calls " ++ show tc ++ "."
-        showStatus
+    then check''
+    else
+      if tc == playerStack pl
+        then allin''
+        else do
+          updateGame call
+          return $ do
+            say $ playerNickname pl ++ " calls " ++ show tc ++ "."
+            showStatus
 
 raise' :: Money -> PokerM ()
 raise' m = handlePokerExceptions $ do
@@ -598,3 +603,9 @@ fold' = joinSTM $ do
     saveBank b
     say $ playerNickname p ++ " folds!"
     showStatus
+
+allin' :: PokerM ()
+allin' = handlePokerExceptions allin''
+
+allin'' :: PokerSTM (PokerM ())
+allin'' = return $ return ()
