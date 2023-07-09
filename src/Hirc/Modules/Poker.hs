@@ -146,11 +146,11 @@ runPokerCommands = do
   when (maybe False isActiveGame mg) $ do
     userCommand' $ \case
       "pot" -> doneAfter showPot
-      "turn" -> doneAfter showCurrentPlayer
-      "order" -> doneAfter showCurrentOrder
-      "hand" -> doneAfter showHand
       "cards" -> doneAfter showCards
       text
+        | text `elem` ["turn", "t"] -> doneAfter showCurrentPlayer
+        | text `elem` ["order", "o"] -> doneAfter showCurrentOrder
+        | text `elem` ["hand", "h"] -> doneAfter showHand
         | text `elem` ["check", "ch"] -> doneAfter $ do
           currentPlayerOnlyGuard
           check'
