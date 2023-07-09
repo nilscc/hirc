@@ -1,13 +1,11 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
-
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
+{-# OPTIONS_GHC -Wno-deriving-defaults #-}
 
 module Hirc.Modules.Poker
   ( pokerModule,
