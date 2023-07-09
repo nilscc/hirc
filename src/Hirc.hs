@@ -39,7 +39,6 @@ module Hirc
   , withNickname, withUsername, withNickAndUser, withServer, withParams
   , MessageM, HircM
   , ContainsMessage (..)
-  , IsHircCommand (..)
 
     -- * IRC types & functions
   , answer, say, whisper, whisperTo, sayIn
@@ -101,7 +100,6 @@ import Hirc.Messages
       withNickAndUser,
       withServer )
 import Hirc.Logging ( logMaybeIO )
-import Hirc.Types.Commands ( IsHircCommand(..) )
 import Hirc.Types.Connection
     ( ConnectionCommand(Nick, PrivMsg, Part, Quit, Join, Pong, Notice),
       RealName,
@@ -245,7 +243,7 @@ quitServer mqmsg = sendCmd' $ Quit (T.pack <$> mqmsg)
 
 -- | Require prefixing user commands with the name of the bot (in a public
 -- channel)
-onValidPrefix :: (IsHircCommand m (String -> m ()), CanSend m) => m () -> m ()
+onValidPrefix :: CanSend m => m () -> m ()
 onValidPrefix wm =
   onCommand "PRIVMSG" $ withParams $ \[c,_] -> do
     myNick <- getNickname
@@ -254,12 +252,12 @@ onValidPrefix wm =
       wm
      else
       -- public channel with valid prefix
-      userCommand $ \(validPrefix myNick -> True) -> wm
+      userCommand $ \text -> when (validPrefix myNick text) wm
  where
   validPrefix :: NickName -> String -> Bool
   validPrefix n s = s =~ ("^" ++ escape n ++ "[:,.-\\!]?$")
 
-  escape n = foldr esc "" n
+  escape = foldr esc ""
   esc '\\' r = "\\\\" ++ r
   esc '['  r = "\\[" ++ r
   esc ']'  r = "\\]" ++ r
@@ -404,7 +402,7 @@ defaultModuleLoop (Module mm s) = do
         logM 1 $ "Blocked indefinitely on STM transaction: " ++ show e
         throwError HircConnectionLost
       logPatternMatchFail (e :: PatternMatchFail) = do
-        logM 1 $ "Pattern match failed"
+        logM 1 "Pattern match failed"
       logSomeException (e :: SomeException) = do
         logM 1 $ "Exception: " ++ show e
 
