@@ -1,11 +1,11 @@
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE ImportQualifiedPost #-}
 
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 
@@ -37,6 +37,7 @@ import Data.Time.Clock (UTCTime, getCurrentTime)
 import GHC.Conc (STM (STM), TVar (TVar))
 import GHC.Num.BigNat (raiseDivZero_BigNat)
 import Hirc
+import Hirc.Commands (userCommand')
 import Hirc.Modules.Poker.Bank
 import Hirc.Modules.Poker.Cards
 import Hirc.Modules.Poker.Exception
@@ -47,7 +48,6 @@ import Hirc.Modules.Poker.STM
 import System.Random
 import System.Random.Shuffle (shuffle', shuffleM)
 import System.Random.Stateful
-import Hirc.Commands (userCommand')
 import Text.Read (readMaybe)
 
 --------------------------------------------------------------------------------
@@ -82,22 +82,21 @@ runPokerModule = handle pokerExceptions $ do
 
 runBankCommands :: PokerM ()
 runBankCommands = do
-  -- debug only:
-  userCommand $ \"bank" -> do
-    b <- runSTM askBank
-    logM 2 $ show b
-
-  userCommand $ \"bank" "balance" -> doneAfter bankBalance'
-  userCommand $ \"bank" "help" -> doneAfter bankHelp
+  userCommand' $ \case
+    "bank help" -> doneAfter bankHelp
+    text
+      | text `elem` ["bank balance", "bb"] -> doneAfter bankBalance'
+      | otherwise -> return ()
 
   -- check if game is running currently
   inGame <- runSTM userInGame
-  userCommand $ \"bank" "loan" -> do
-    if inGame
-      then do
-        answer "You cannot loan money while in a game!"
-      else do
-        doneAfter $ bankLoan defaultLoan
+
+  userCommand' $ \case
+    "bank loan" -> doneAfter $ do
+      if inGame
+        then answer "You cannot loan money while in a game!"
+        else bankLoan defaultLoan
+    _ -> return ()
 
 -- userCommand $ \"bank" "withdraw" amount -> doneAfter $
 --   bankWithdraw $ Just (read amount)
@@ -118,11 +117,9 @@ saveBank b = liftIO $ saveToJson b "bank.json"
 
 runPokerCommands :: PokerM ()
 runPokerCommands = do
-  
   mg <- runSTM askMaybeGame
 
   when (maybe True isNewGame mg) $ do
-
     userCommand' $ \case
       "poker help" -> doneAfter showHelp
       "players" -> doneAfter showPlayers
@@ -130,11 +127,11 @@ runPokerCommands = do
         | text `elem` ["stack", "s"] -> doneAfter showStack
         | text `elem` ["poker join", "pj"] -> doneAfter joinPlayer'
         | text `elem` ["poker leave", "pl"] -> doneAfter $ do
-          playerInGameGuard
-          playerQuit
+            playerInGameGuard
+            playerQuit
         | text `elem` ["deal", "deal cards", "d"] -> doneAfter $ do
-          playerInGameGuard
-          dealCards'
+            playerInGameGuard
+            dealCards'
         | otherwise -> return ()
 
   -- while in game
@@ -148,19 +145,19 @@ runPokerCommands = do
         | text `elem` ["order", "o"] -> doneAfter showCurrentOrder
         | text `elem` ["hand", "h"] -> doneAfter showHand
         | text `elem` ["check", "ch"] -> doneAfter $ do
-          currentPlayerOnlyGuard
-          check'
+            currentPlayerOnlyGuard
+            check'
         | text `elem` ["call", "ca", "c"] -> doneAfter $ do
-          currentPlayerOnlyGuard
-          call'
-        | [r,v] <- words text
-        , r `elem` ["raise", "r"]
-        , Just amount <- readMaybe v -> doneAfter $ do
-          currentPlayerOnlyGuard
-          raise' amount
+            currentPlayerOnlyGuard
+            call'
+        | [r, v] <- words text,
+          r `elem` ["raise", "r"],
+          Just amount <- readMaybe v -> doneAfter $ do
+            currentPlayerOnlyGuard
+            raise' amount
         | text `elem` ["fold", "f"] -> doneAfter $ do
-          currentPlayerOnlyGuard
-          fold'
+            currentPlayerOnlyGuard
+            fold'
         | otherwise -> return ()
 
 -- userCommand $ \"all" "in"       -> doneAfter allIn
@@ -573,16 +570,17 @@ call' :: PokerM ()
 call' = handlePokerExceptions $ do
   pl <- askCurrentPlayer
   tc <- askToCall pl
-  if tc == 0 then do
-    updateGame check
-    return $ do
-      say $ playerNickname pl ++ " checks."
-      showStatus
-   else do
-    updateGame call
-    return $ do
-      say $ playerNickname pl ++ " calls."
-      showStatus
+  if tc == 0
+    then do
+      updateGame check
+      return $ do
+        say $ playerNickname pl ++ " checks."
+        showStatus
+    else do
+      updateGame call
+      return $ do
+        say $ playerNickname pl ++ " calls."
+        showStatus
 
 raise' :: Money -> PokerM ()
 raise' m = handlePokerExceptions $ do
