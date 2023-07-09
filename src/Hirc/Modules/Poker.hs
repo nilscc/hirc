@@ -126,8 +126,8 @@ runPokerCommands = do
     userCommand' $ \case
       "poker help" -> doneAfter showHelp
       "players" -> doneAfter showPlayers
-      "stack" -> doneAfter showStack
       text
+        | text `elem` ["stack", "s"] -> doneAfter showStack
         | text `elem` ["poker join", "pj"] -> doneAfter joinPlayer'
         | otherwise -> return ()
 
