@@ -16,7 +16,6 @@ import Control.Monad.RWS (MonadState)
 import Control.Monad.Reader (MonadReader (ask, local), ReaderT (runReaderT), mapReaderT)
 import Control.Monad.Trans.Class (MonadTrans (lift))
 import Hirc.Connection (awaitTVar)
-import Hirc.Types.Commands (HircCommand (..), IsHircCommand (..))
 import Hirc.Types.Hirc (CanRun (..), CanSend, ContainsIrcInstance (askIrcInstance), ContainsLogInstance (askLogInstance), ContainsMessage (getMessage, localMessage), HircInstance (ircInstance, logInstance), HircM (..), MessageM (MessageM, unMessageM))
 
 --------------------------------------------------------------------------------
@@ -102,53 +101,6 @@ instance CanRun (MState s MessageM) HircM where
 instance CanRun (MState s MessageM) IO where
   runInside = lift . runInside
 -}
-
---------------------------------------------------------------------------------
--- HircCommand instances
-
--- Basic type instances
-
-instance IsHircCommand m () where
-  toCmd _ = HC_Nothing
-
--- functions
-
-instance IsHircCommand m a => IsHircCommand m (String -> a) where
-  toCmd f = HC_Lam (toCmd . f)
-
-instance IsHircCommand m a => IsHircCommand m ([String] -> a) where
-  toCmd f = HC_Lams (toCmd . f)
-
--- monads
-
-type ModM s = ReaderT s MessageM
-
--- instance (CanRun m m, IsHircCommand m a) => IsHircCommand m (m a) where
--- toCmd m    = HC_Run $ m >>= return . toCmd
-
-instance IsHircCommand (ModM s) a => IsHircCommand (ModM s) (ModM s a) where
-  toCmd modm = mkHcRun modm
-
-instance (CanRun (ModM s) MessageM, IsHircCommand (ModM s) a) => IsHircCommand (ModM s) (MessageM a) where
-  toCmd = mkHcRunInside
-
-instance IsHircCommand MessageM a => IsHircCommand MessageM (MessageM a) where
-  toCmd msgm = mkHcRun msgm
-
-instance (CanRun MessageM HircM, IsHircCommand MessageM a) => IsHircCommand MessageM (HircM a) where
-  toCmd = mkHcRunInside
-
-instance IsHircCommand HircM a => IsHircCommand HircM (HircM a) where
-  toCmd = mkHcRun
-
-instance (CanRun HircM IO, IsHircCommand HircM a) => IsHircCommand HircM (IO a) where
-  toCmd = mkHcRunInside
-
-mkHcRun :: (Monad m, IsHircCommand m a) => m a -> HircCommand m
-mkHcRun f = HC_Run $ toCmd <$> f
-
-mkHcRunInside :: (IsHircCommand m a, CanRun m f) => f a -> HircCommand m
-mkHcRunInside f = HC_Run $ runInside $ toCmd <$> f
 
 --------------------------------------------------------------------------------
 -- Log instances
