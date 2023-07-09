@@ -328,7 +328,7 @@ incPosition g =
 
 call :: Game -> GameUpdate
 call g
-  | tc == 0 = failed CheckInstead
+  | tc == 0 = check g
   | otherwise = onOK (next . incPosition) $ bet tc g
   where
     tc = toCall g

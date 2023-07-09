@@ -1,20 +1,23 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses,
-             UndecidableInstances, TypeFamilies, ConstraintKinds,
-             FlexibleContexts #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
+
 {-# OPTIONS -fno-warn-orphans #-}
 
 module Hirc.Types.Instances where
 
-import Control.Monad.Trans.Class (MonadTrans(lift))
-import Control.Monad.IO.Class ( MonadIO(liftIO) )
-import Control.Monad.IO.Peel ( MonadPeelIO(peelIO) )
-import Control.Monad.Reader ( ReaderT (runReaderT), MonadReader (ask, local), mapReaderT )
-
-import Hirc.Types.Commands ( IsHircCommand(..), HircCommand(..) )
-import Hirc.Types.Hirc ( CanRun(..), MessageM (unMessageM, MessageM), HircM (..), ContainsMessage (getMessage, localMessage), ContainsIrcInstance (askIrcInstance), HircInstance (ircInstance, logInstance), ContainsLogInstance (askLogInstance), CanSend )
-import Control.Concurrent.STM (atomically, readTVarIO, TVar)
-import Hirc.Connection (awaitTVar)
+import Control.Concurrent.STM (TVar, atomically, readTVarIO)
+import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Monad.IO.Peel (MonadPeelIO (peelIO))
 import Control.Monad.RWS (MonadState)
+import Control.Monad.Reader (MonadReader (ask, local), ReaderT (runReaderT), mapReaderT)
+import Control.Monad.Trans.Class (MonadTrans (lift))
+import Hirc.Connection (awaitTVar)
+import Hirc.Types.Commands (HircCommand (..), IsHircCommand (..))
+import Hirc.Types.Hirc (CanRun (..), CanSend, ContainsIrcInstance (askIrcInstance), ContainsLogInstance (askLogInstance), ContainsMessage (getMessage, localMessage), HircInstance (ircInstance, logInstance), HircM (..), MessageM (MessageM, unMessageM))
 
 --------------------------------------------------------------------------------
 -- Filter monad instances
@@ -30,8 +33,6 @@ instance ContainsIrcInstance MessageM where
 instance ContainsIrcInstance m => ContainsIrcInstance (ReaderT r m) where
   askIrcInstance = lift askIrcInstance
 
-
-
 instance ContainsLogInstance HircM where
   askLogInstance = do
     hinst <- ask
@@ -43,8 +44,6 @@ instance ContainsLogInstance m => ContainsLogInstance (ReaderT r m) where
 instance ContainsLogInstance MessageM where
   askLogInstance = MessageM . lift . lift $ askLogInstance
 
-
-
 instance ContainsMessage MessageM where
   getMessage = ask
   localMessage = local
@@ -52,7 +51,6 @@ instance ContainsMessage MessageM where
 instance (ContainsMessage m) => ContainsMessage (ReaderT r m) where
   getMessage = lift getMessage
   localMessage f = mapReaderT (localMessage f)
-
 
 instance MonadPeelIO HircM where
   peelIO = HircM $ do
@@ -64,9 +62,9 @@ instance MonadPeelIO MessageM where
     k <- peelIO
     return $ \(MessageM m) -> MessageM <$> k m
 
+instance CanSend MessageM
 
-instance CanSend MessageM where
-instance CanSend m => CanSend (ReaderT r m) where
+instance CanSend m => CanSend (ReaderT r m)
 
 {-
 instance ContainsMessage (MState s MessageM) where
@@ -81,13 +79,16 @@ instance ContainsMessage (MState s MessageM) where
 
 instance CanRun HircM HircM where
   runInside = id
+
 instance CanRun HircM IO where
   runInside = liftIO
 
 instance CanRun MessageM MessageM where
   runInside = id
+
 instance CanRun MessageM HircM where
   runInside = MessageM . lift . lift
+
 instance CanRun MessageM IO where
   runInside = MessageM . lift . lift . runInside
 
@@ -102,41 +103,44 @@ instance CanRun (MState s MessageM) IO where
   runInside = lift . runInside
 -}
 
-
 --------------------------------------------------------------------------------
 -- HircCommand instances
 
 -- Basic type instances
 
 instance IsHircCommand m () where
-  toCmd _    = HC_Nothing
+  toCmd _ = HC_Nothing
 
 -- functions
 
 instance IsHircCommand m a => IsHircCommand m (String -> a) where
-  toCmd f    = HC_Lam  (toCmd . f)
+  toCmd f = HC_Lam (toCmd . f)
+
 instance IsHircCommand m a => IsHircCommand m ([String] -> a) where
-  toCmd f    = HC_Lams (toCmd . f)
+  toCmd f = HC_Lams (toCmd . f)
 
 -- monads
 
 type ModM s = ReaderT s MessageM
 
---instance (CanRun m m, IsHircCommand m a) => IsHircCommand m (m a) where
-  --toCmd m    = HC_Run $ m >>= return . toCmd
+-- instance (CanRun m m, IsHircCommand m a) => IsHircCommand m (m a) where
+-- toCmd m    = HC_Run $ m >>= return . toCmd
 
 instance IsHircCommand (ModM s) a => IsHircCommand (ModM s) (ModM s a) where
   toCmd modm = mkHcRun modm
+
 instance (CanRun (ModM s) MessageM, IsHircCommand (ModM s) a) => IsHircCommand (ModM s) (MessageM a) where
   toCmd = mkHcRunInside
 
 instance IsHircCommand MessageM a => IsHircCommand MessageM (MessageM a) where
   toCmd msgm = mkHcRun msgm
+
 instance (CanRun MessageM HircM, IsHircCommand MessageM a) => IsHircCommand MessageM (HircM a) where
   toCmd = mkHcRunInside
 
 instance IsHircCommand HircM a => IsHircCommand HircM (HircM a) where
   toCmd = mkHcRun
+
 instance (CanRun HircM IO, IsHircCommand HircM a) => IsHircCommand HircM (IO a) where
   toCmd = mkHcRunInside
 
@@ -145,7 +149,6 @@ mkHcRun f = HC_Run $ toCmd <$> f
 
 mkHcRunInside :: (IsHircCommand m a, CanRun m f) => f a -> HircCommand m
 mkHcRunInside f = HC_Run $ runInside $ toCmd <$> f
-
 
 --------------------------------------------------------------------------------
 -- Log instances
@@ -167,7 +170,6 @@ instance (LogM m) => LogM (ReaderT t m) where
   logChan     = lift logChan
   logSettings = lift logSettings
 -}
-
 
 --------------------------------------------------------------------------------
 -- Managed monad instances
