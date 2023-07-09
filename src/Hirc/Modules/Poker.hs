@@ -576,10 +576,17 @@ check' = handlePokerExceptions $ do
 call' :: PokerM ()
 call' = handlePokerExceptions $ do
   pl <- askCurrentPlayer
-  updateGame call
-  return $ do
-    say $ playerNickname pl ++ " calls."
-    showStatus
+  tc <- askToCall pl
+  if tc == 0 then do
+    updateGame check
+    return $ do
+      say $ playerNickname pl ++ " checks."
+      showStatus
+   else do
+    updateGame call
+    return $ do
+      say $ playerNickname pl ++ " calls."
+      showStatus
 
 raise' :: Money -> PokerM ()
 raise' m = handlePokerExceptions $ do
