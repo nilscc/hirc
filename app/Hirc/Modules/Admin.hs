@@ -25,7 +25,7 @@ runAdminModule :: AdminM ()
 runAdminModule = do
   currentChannel <- getCurrentChannel
   onValidPrefix $ do
-    userCommand' $ \text -> case words text of
+    userCommand $ \text -> case words text of
       ["admin", "auth", pw] -> auth pw
       ["admin", "join", channel] -> requireAuth $ joinChannel channel
       ["admin", "part", channel] -> doneAfter $ requireAuth $ partChannel channel

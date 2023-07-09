@@ -3,7 +3,7 @@
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
 module Hirc.Commands
-  ( userCommand'
+  ( userCommand
   ) where
 
 import qualified Data.ByteString.Char8 as B8
@@ -20,8 +20,8 @@ import Data.List.Extra (trim)
 --------------------------------------------------------------------------------
 -- Running
 
-userCommand' :: CanSend m => (String -> m ()) -> m ()
-userCommand' cmd = onCommand "PRIVMSG" $ withParams $ \[_,text] -> cmd (trim text)
+userCommand :: CanSend m => (String -> m ()) -> m ()
+userCommand cmd = onCommand "PRIVMSG" $ withParams $ \[_,text] -> cmd (trim text)
 
 --------------------------------------------------------------------------------
 -- ReaderT modification

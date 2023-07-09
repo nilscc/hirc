@@ -34,7 +34,7 @@ module Hirc
   , module Hirc.Acid
 
     -- * Messages & user commands
-  , userCommand', onValidPrefix, onNickChange, onCommand
+  , userCommand, onValidPrefix, onNickChange, onCommand
   , done, doneAfter, getCurrentChannel
   , withNickname, withUsername, withNickAndUser, withServer, withParams
   , MessageM, HircM
@@ -85,7 +85,7 @@ import Data.Text as T (pack)
 import Text.Regex.Posix ( (=~) )
 
 import Hirc.Acid
-import Hirc.Commands ( userCommand' )
+import Hirc.Commands ( userCommand )
 import Hirc.Connection
     ( Message(..), Channel, stdReconnect, connect, sendCmd, awaitTVar )
 import Hirc.Messages
@@ -252,7 +252,7 @@ onValidPrefix wm =
       wm
      else
       -- public channel with valid prefix
-      userCommand' $ \text -> when (validPrefix myNick text) wm
+      userCommand $ \text -> when (validPrefix myNick text) wm
  where
   validPrefix :: NickName -> String -> Bool
   validPrefix n s = s =~ ("^" ++ escape n ++ "[:,.-\\!]?$")

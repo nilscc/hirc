@@ -37,7 +37,7 @@ import Data.Time.Clock (UTCTime, getCurrentTime)
 import GHC.Conc (STM (STM), TVar (TVar))
 import GHC.Num.BigNat (raiseDivZero_BigNat)
 import Hirc
-import Hirc.Commands (userCommand')
+import Hirc.Commands (userCommand)
 import Hirc.Modules.Poker.Bank
 import Hirc.Modules.Poker.Cards
 import Hirc.Modules.Poker.Exception
@@ -82,7 +82,7 @@ runPokerModule = handle pokerExceptions $ do
 
 runBankCommands :: PokerM ()
 runBankCommands = do
-  userCommand' $ \case
+  userCommand $ \case
     "bank help" -> doneAfter bankHelp
     text
       | text `elem` ["bank balance", "bb"] -> doneAfter bankBalance'
@@ -91,7 +91,7 @@ runBankCommands = do
   -- check if game is running currently
   inGame <- runSTM userInGame
 
-  userCommand' $ \case
+  userCommand $ \case
     "bank loan" -> doneAfter $ do
       if inGame
         then answer "You cannot loan money while in a game!"
@@ -120,7 +120,7 @@ runPokerCommands = do
   mg <- runSTM askMaybeGame
 
   when (maybe True isNewGame mg) $ do
-    userCommand' $ \case
+    userCommand $ \case
       "poker help" -> doneAfter showHelp
       "players" -> doneAfter showPlayers
       text
@@ -136,7 +136,7 @@ runPokerCommands = do
 
   -- while in game
   when (maybe False isActiveGame mg) $ do
-    userCommand' $ \case
+    userCommand $ \case
       "pot" -> doneAfter showPot
       "cards" -> doneAfter showCards
       text
