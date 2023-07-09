@@ -129,11 +129,6 @@ runPokerCommands = do
       text
         | text `elem` ["stack", "s"] -> doneAfter showStack
         | text `elem` ["poker join", "pj"] -> doneAfter joinPlayer'
-        | otherwise -> return ()
-
-    
-    userCommand' $ \case
-      text
         | text `elem` ["poker leave", "pl"] -> doneAfter $ do
           playerInGameGuard
           playerQuit
@@ -148,6 +143,7 @@ runPokerCommands = do
       "pot" -> doneAfter showPot
       "cards" -> doneAfter showCards
       text
+        | text `elem` ["stack", "s"] -> doneAfter showStack
         | text `elem` ["turn", "t"] -> doneAfter showCurrentPlayer
         | text `elem` ["order", "o"] -> doneAfter showCurrentOrder
         | text `elem` ["hand", "h"] -> doneAfter showHand
