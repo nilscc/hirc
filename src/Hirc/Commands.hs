@@ -50,7 +50,7 @@ import Data.List.Extra (trim)
 -- > {-# OPTIONS -fno-warn-incomplete-patterns #-}
 userCommand :: (CanSend m, IsHircCommand m cmd) => cmd -> m ()
 userCommand cmd = onCommand "PRIVMSG" $ withParams $ \[_,text] ->
-  runC (words text) (toCmd cmd) `CEP.catch` \(PatternMatchFail{}) -> return ()
+  runC (words text) (toCmd cmd) `CEP.catch` \PatternMatchFail{} -> return ()
 
 runC :: (ContainsMessage m, MonadFail m) => [String] -> HircCommand m -> m ()
 runC wrds cmd = case cmd of
