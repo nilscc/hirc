@@ -16,6 +16,7 @@ import Hirc.Messages
     ( onCommand, withParams )
 import Control.Exception (PatternMatchFail)
 import Control.Exception.Peel as CEP
+import Data.List.Extra (trim)
 
 
 --------------------------------------------------------------------------------
@@ -63,7 +64,7 @@ runC wrds cmd = case cmd of
   HC_Lams f -> runC [] $ f wrds
 
 userCommand' :: CanSend m => (String -> m ()) -> m ()
-userCommand' cmd = onCommand "PRIVMSG" $ withParams $ \[_,text] -> cmd text
+userCommand' cmd = onCommand "PRIVMSG" $ withParams $ \[_,text] -> cmd (trim text)
 
 --------------------------------------------------------------------------------
 -- ReaderT modification
