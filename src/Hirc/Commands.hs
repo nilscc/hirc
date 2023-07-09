@@ -9,7 +9,6 @@ module Hirc.Commands
 import qualified Data.ByteString.Char8 as B8
 import Network.IRC ( Message(Message, msg_params) )
 
-import Hirc.Types.Commands ( IsHircCommand(..), HircCommand(..) )
 import Hirc.Types.Hirc ( ContainsMessage(localMessage), CanSend )
 import Hirc.Messages
     ( onCommand, withParams )
