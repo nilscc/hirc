@@ -329,9 +329,11 @@ incPosition g =
 call :: Game -> GameUpdate
 call g
   | tc == 0 = check g
+  | tc >= stack = failed InsufficientFunds{ have = stack, need = tc }
   | otherwise = onOK (next . incPosition) $ bet tc g
   where
     tc = toCall g
+    stack = playerStack $ currentPlayer g
 
 check :: Game -> GameUpdate
 check g

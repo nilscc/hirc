@@ -136,6 +136,7 @@ runPokerCommands = do
   when (maybe False isActiveGame mg) $ do
     userCommand $ \case
       "cards" -> doneAfter showCards
+      "all in" -> doneAfter allin'
       text
         | text `elem` ["pot", "p"] -> doneAfter showPot
         | text `elem` ["stack", "s"] -> doneAfter showStack
@@ -213,11 +214,11 @@ handlePokerExceptions stm = joinSTM $ handleP (return . hndl) stm
     hndl :: PokerException -> PokerM ()
     hndl (InsufficientFunds need have) = do
       answer $
-        "You don't have enough money! You need: "
+        "You don't have enough money. You need: "
           ++ show need
-          ++ " (you have: "
+          ++ ", you have: "
           ++ show have
-          ++ ")"
+          ++ ". Consider going all in!"
     hndl (CallFirst tc) = do
       answer $ "You have to call first: " ++ show tc
     hndl (RaiseTooSmall minimumRaise) = do
@@ -576,14 +577,11 @@ call' = handlePokerExceptions $ do
   tc <- askToCall pl
   if tc == 0
     then check''
-    else
-      if tc == playerStack pl
-        then allin''
-        else do
-          updateGame call
-          return $ do
-            say $ playerNickname pl ++ " calls " ++ show tc ++ "."
-            showStatus
+    else do
+      updateGame call
+      return $ do
+        say $ playerNickname pl ++ " calls " ++ show tc ++ "."
+        showStatus
 
 raise' :: Money -> PokerM ()
 raise' m = handlePokerExceptions $ do
