@@ -137,7 +137,7 @@ runPokerCommands = do
         | text `elem` ["poker leave", "pl"] -> doneAfter $ do
           playerInGameGuard
           playerQuit
-        | text `elem` ["deal", "deal cards"] -> doneAfter $ do
+        | text `elem` ["deal", "deal cards", "d"] -> doneAfter $ do
           playerInGameGuard
           dealCards'
         | otherwise -> return ()
