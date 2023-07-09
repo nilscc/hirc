@@ -47,6 +47,8 @@ import Hirc.Modules.Poker.STM
 import System.Random
 import System.Random.Shuffle (shuffle', shuffleM)
 import System.Random.Stateful
+import Hirc.Commands (userCommand')
+import Text.Read (readMaybe)
 
 --------------------------------------------------------------------------------
 -- The main module
@@ -116,62 +118,54 @@ saveBank b = liftIO $ saveToJson b "bank.json"
 
 runPokerCommands :: PokerM ()
 runPokerCommands = do
-  --
-  -- START DEBUG
-  --
-
-  userCommand $ \"game" -> doneAfter $ do
-    ms <- runSTM askMaybeGameState
-    logM 2 $ show ms
-
-  --
-  -- END DEBUG
-  --
-
-  userCommand $ \"poker" "help" -> doneAfter showHelp
-
-  userCommand $ \"players" -> doneAfter showPlayers
-  userCommand $ \"stack" -> doneAfter showStack
-
+  
   mg <- runSTM askMaybeGame
 
-  -- starting a new game
   when (maybe True isNewGame mg) $ do
-    userCommand $ \"poker" "join" -> doneAfter joinPlayer'
-    userCommand $ \"poker" "leave" -> doneAfter $ do
-      playerInGameGuard
-      playerQuit
 
-    let runDeal = doneAfter $ do
+    userCommand' $ \case
+      "poker help" -> doneAfter showHelp
+      "players" -> doneAfter showPlayers
+      "stack" -> doneAfter showStack
+      text
+        | text `elem` ["poker join", "pj"] -> doneAfter joinPlayer'
+        | otherwise -> return ()
+
+    
+    userCommand' $ \case
+      text
+        | text `elem` ["poker leave", "pl"] -> doneAfter $ do
+          playerInGameGuard
+          playerQuit
+        | text `elem` ["deal", "deal cards"] -> doneAfter $ do
           playerInGameGuard
           dealCards'
-
-    userCommand $ \"deal" "cards" -> runDeal
-    userCommand $ \"deal" -> runDeal
+        | otherwise -> return ()
 
   -- while in game
   when (maybe False isActiveGame mg) $ do
-    userCommand $ \"pot" -> doneAfter showPot
-    userCommand $ \"turn" -> doneAfter showCurrentPlayer
-    userCommand $ \"order" -> doneAfter showCurrentOrder
-    userCommand $ \"hand" -> doneAfter showHand
-    userCommand $ \"cards" -> doneAfter showCards
-
-    userCommand $ \"check" -> doneAfter $ do
-      currentPlayerOnlyGuard
-      check'
-
-    userCommand $ \"call" -> doneAfter $ do
-      currentPlayerOnlyGuard
-      call'
-
-    userCommand $ \"raise" amount -> doneAfter $ do
-      currentPlayerOnlyGuard
-      raise' (read amount)
-
-    userCommand $ \"fold" -> doneAfter $ do
-      currentPlayerOnlyGuard
-      fold'
+    userCommand' $ \case
+      "pot" -> doneAfter showPot
+      "turn" -> doneAfter showCurrentPlayer
+      "order" -> doneAfter showCurrentOrder
+      "hand" -> doneAfter showHand
+      "cards" -> doneAfter showCards
+      text
+        | text `elem` ["check", "ch"] -> doneAfter $ do
+          currentPlayerOnlyGuard
+          check'
+        | text `elem` ["call", "ca", "c"] -> doneAfter $ do
+          currentPlayerOnlyGuard
+          call'
+        | [r,v] <- words text
+        , r `elem` ["raise", "r"]
+        , Just amount <- readMaybe v -> doneAfter $ do
+          currentPlayerOnlyGuard
+          raise' amount
+        | text `elem` ["fold", "f"] -> doneAfter $ do
+          currentPlayerOnlyGuard
+          fold'
+        | otherwise -> return ()
 
 -- userCommand $ \"all" "in"       -> doneAfter allIn
 

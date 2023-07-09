@@ -4,6 +4,7 @@
 
 module Hirc.Commands
   ( userCommand
+  , userCommand'
   ) where
 
 import qualified Data.ByteString.Char8 as B8
@@ -61,6 +62,8 @@ runC wrds cmd = case cmd of
          []     -> return ()
   HC_Lams f -> runC [] $ f wrds
 
+userCommand' :: CanSend m => (String -> m ()) -> m ()
+userCommand' cmd = onCommand "PRIVMSG" $ withParams $ \[_,text] -> cmd text
 
 --------------------------------------------------------------------------------
 -- ReaderT modification
