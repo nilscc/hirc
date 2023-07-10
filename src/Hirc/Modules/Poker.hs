@@ -579,7 +579,7 @@ call' = handlePokerExceptions $ do
     else do
       updateGame call
       return $ do
-        say $ playerNickname pl ++ " calls."
+        say $ playerNickname pl ++ " calls " ++ show tc ++ "."
         showStatus
 
 raise' :: Money -> PokerM ()
