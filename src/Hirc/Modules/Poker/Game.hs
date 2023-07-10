@@ -299,25 +299,28 @@ totalPotSize :: Game -> Money
 totalPotSize g = mainPotSize g + sidePotsSize g
 
 toCall :: Game -> Money
-toCall g = P.toCall u (mainPot g) + sum (map (P.toCall u) (sidePots g))
+toCall g = toCallMainPot u g + toCallSidePots u g
   where
     u = currentUserName g
 
+toCallMainPot, toCallSidePots :: UserName -> Game -> Money
+toCallMainPot u g = P.toCall u (mainPot g)
+toCallSidePots u g = sum (map (P.toCall u) (sidePots g))
+
 bet :: Money -> Game -> GameUpdate
 bet m g
-  | playerStack p < m =
-      failed
-        InsufficientFunds
-          { need = m,
-            have = playerStack p
+  | s < m || m < toCall g = failed InsufficientFunds {need = m, have = s}
+  | otherwise =
+      ok
+        g
+          { playerStacks = M.adjust (subtract m) u (playerStacks g),
+            sidePots = map paySidePot (sidePots g),
+            mainPot = P.put u (m - toCallSidePots u g) (mainPot g)
           }
-  | otherwise = ok $ updateCurrentPlayer `flip` g $ \p ->
-      p
-        { playerStack = playerStack p - m,
-          playerPot = playerPot p + m
-        }
   where
-    p = currentPlayer g
+    u = currentUserName g
+    s = fromMaybe 0 $ M.lookup u (playerStacks g)
+    paySidePot sp = P.put u (P.toCall u sp) sp
 
 -- | Increment current position to next player
 incPosition :: Game -> Game
@@ -329,7 +332,7 @@ incPosition g =
 call :: Game -> GameUpdate
 call g
   | tc == 0 = check g
-  | tc >= stack = failed InsufficientFunds{ have = stack, need = tc }
+  | tc >= stack = failed InsufficientFunds {have = stack, need = tc}
   | otherwise = onOK (next . incPosition) $ bet tc g
   where
     tc = toCall g

@@ -606,4 +606,9 @@ allin' :: PokerM ()
 allin' = handlePokerExceptions allin''
 
 allin'' :: PokerSTM (PokerM ())
-allin'' = return $ return ()
+allin'' = do
+  p <- askCurrentPlayer
+  updateGame allIn
+  return $ do
+    say $ playerNickname p ++ " is all in!"
+    showStatus
